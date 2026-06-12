@@ -42,6 +42,8 @@ tail -f ~/.e2e-monitor/match-<eventId>.log
   replay는 라이브 경기엔 동작하지 않는다(데몬을 안내).
 - **데몬이 안 떠 있는데 상태를 물으면**: 로그 파일이 있으면 그걸로 답하고, 없으면
   list부터 제안한다.
+- **"골 애니메이션 꺼줘/켜줘"**: `~/.e2e-monitor/config.json`의 `"goalAnimation"`을
+  false/true로 바꾼다 (기본 on). 다음에 시작하는 daemon/replay부터 적용된다.
 
 ## 주의
 
@@ -50,3 +52,6 @@ tail -f ~/.e2e-monitor/match-<eventId>.log
 - API 장애 시 데몬은 죽지 않고 `match-<eventId>.raw.jsonl` 사이드카에 raw를 남긴다.
   디버깅 요청이 오면 그 파일을 본다.
 - `claude` CLI가 없는 환경에서도 템플릿 폴백으로 동작한다 — narrator 에러는 치명이 아니다.
+- 골 순간에는 약 10초간 위장을 해제하는 ASCII 애니메이션이 로그에 흐른다(기본 on).
+  골에서만 발동하며, 스코어·시간 fact 라인은 애니메이션과 무관하게 항상 먼저 출력된다.
+  아트는 `art/goal/*.txt` 플러그인 — 작성법은 `skins/README.md` 참조.

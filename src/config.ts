@@ -8,6 +8,7 @@ export const CONFIG_DIR = path.join(os.homedir(), '.e2e-monitor');
 const DEFAULTS: Config = {
   league: 'fifa.world',
   logDir: CONFIG_DIR,
+  goalAnimation: true,
   pollIntervalSec: 10,
   tier2PollIntervalSec: 3,
   tier2: {
@@ -53,6 +54,7 @@ export function loadConfig(configPath?: string): Config {
   merged.narrator.timeoutSec = Math.max(5, finiteOr(merged.narrator.timeoutSec, DEFAULTS.narrator.timeoutSec));
   if (!['auto', 'claude', 'template'].includes(merged.narrator.mode)) merged.narrator.mode = 'auto';
   merged.narrator.model = typeof merged.narrator.model === 'string' ? merged.narrator.model : DEFAULTS.narrator.model;
+  merged.goalAnimation = merged.goalAnimation !== false; // 기본 on — false 명시로만 끈다
   merged.league = typeof merged.league === 'string' && merged.league ? merged.league : DEFAULTS.league;
   merged.logDir = expandHome(typeof merged.logDir === 'string' && merged.logDir ? merged.logDir : DEFAULTS.logDir);
   merged.skin = typeof merged.skin === 'string' ? merged.skin : undefined;

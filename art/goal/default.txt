@@ -1,0 +1,56 @@
+# e2e-monitor 골 애니메이션 기본 아트팩 (~10초)
+# 형식: skins/README.md의 "골 애니메이션 아트팩" 섹션 참조
+# 구조: 빌드업(공 궤적 가속) → 임팩트 → 대형 GOAL 점진 공개 → 에코 감쇠 → 위장 복귀
+#delay 450
+{dim}        ●{reset}
+---
+#delay 380
+{dim}                ●{reset}
+---
+#delay 300
+{dim}                          ●{reset}
+---
+#delay 240
+{cyan}                                    ●{reset}
+---
+#delay 200
+{cyan}                                            ●▸{reset}
+---
+#delay 600
+{bold}{yellow}                                               ⊗ 골망이 찢어진다{reset}
+---
+#delay 400
+{bold}{yellow}      ██████╗  ██████╗  █████╗  ██╗      ██╗{reset}
+---
+#delay 400
+{bold}{yellow}     ██╔════╝ ██╔═══██╗██╔══██╗ ██║      ██║{reset}
+---
+#delay 400
+{bold}{yellow}     ██║  ███╗██║   ██║███████║ ██║      ██║{reset}
+---
+#delay 400
+{bold}{yellow}     ██║   ██║██║   ██║██╔══██║ ██║      ╚═╝{reset}
+---
+#delay 400
+{bold}{yellow}     ╚██████╔╝╚██████╔╝██║  ██║ ███████╗ ██╗{reset}
+---
+#delay 400
+{bold}{yellow}      ╚═════╝  ╚═════╝ ╚═╝  ╚═╝ ╚══════╝ ╚═╝{reset}
+---
+#delay 900
+{yellow}        ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦ ✦{reset}
+---
+#delay 700
+{bold}{yellow}     G  O  O  O  O  O  O  O  O  O  A  L  !{reset}
+---
+#delay 700
+{yellow}           G O O O O O A L !{reset}
+---
+#delay 750
+{dim}                 g o o a l …{reset}
+---
+#delay 900
+{dim}                     관중석이 무너진다. 숨을 고르고, 중계로 복귀.{reset}
+---
+#delay 250
+{dim}────────────────────────────────────────────────────{reset}

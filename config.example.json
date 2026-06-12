@@ -1,6 +1,7 @@
 {
   "skin": "ts-dev",
   "league": "fifa.world",
+  "goalAnimation": true,
   "logDir": "~/.e2e-monitor",
   "pollIntervalSec": 10,
   "tier2PollIntervalSec": 3,

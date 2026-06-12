@@ -37,6 +37,18 @@ export class MatchLogger {
   }
 
   /**
+   * 미리 조판된 텍스트(골 애니메이션 프레임)의 raw append — wrap 없이 그대로.
+   * ANSI 색 코드가 길이 계산에 섞이면 wrap이 아트를 찢는다.
+   */
+  art(text: string): void {
+    try {
+      fs.appendFileSync(this.logPath, text + '\n');
+    } catch {
+      // 프레임 하나 유실은 연출 문제일 뿐 — 데몬은 계속 간다
+    }
+  }
+
+  /**
    * 위장 로그를 오염시키지 않는 사이드카. 스키마 변경·장애 시 raw JSON은 여기 쌓인다.
    * (위장 원칙: 메인 로그에 이벤트가 아닌 것을 흘리지 않는다)
    */

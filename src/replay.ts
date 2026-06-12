@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { celebrateGoal } from './celebrate.js';
 import { loadConfig } from './config.js';
 import { fetchSummary } from './espn.js';
 import { MatchLogger, sleep } from './logger.js';
@@ -110,6 +111,11 @@ export async function runReplay(eventId: string, opts: ReplayOptions = {}): Prom
 
     if (e.tier === 2) {
       await logger.stream(renderEvent(e, running, skin), STREAM_GAP_MS);
+      // 골 애니메이션: replay는 순차 재생이라 await가 정당하다 — 다음 이벤트는 어차피 페이스 대기다.
+      // retrace 각색은 애니메이션 뒤에 시작시켜 프레임 사이에 끼어들지 않게 한다 (데몬과 달리 가능한 사치)
+      if (e.category === 'goal' && config.goalAnimation) {
+        await celebrateGoal(logger).catch(() => {});
+      }
       if ((e.category === 'goal' || e.category === 'red') && pendingReplays.length < 2) {
         const snapAt = { ...running };
         pendingReplays.push(

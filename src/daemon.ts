@@ -1,3 +1,4 @@
+import { celebrateGoal } from './celebrate.js';
 import { loadConfig } from './config.js';
 import { fetchSummary } from './espn.js';
 import { MatchLogger, sleep } from './logger.js';
@@ -43,6 +44,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
   );
 
   const pendingReplays = new Set<Promise<void>>();
+  let celebration: Promise<void> = Promise.resolve();
   let fastUntil = 0;
   let errStreak = 0;
   let primed = state.kickoffAnnounced; // 재시작 시엔 seen 셋이 있으니 캐치업 불필요
@@ -146,6 +148,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
     const endgame = isEndgameClose(snap, config);
     const tier2Events = events.filter((e) => e.tier === 2 || (endgame && e.tier >= 1));
     const tier1Events = events.filter((e) => !tier2Events.includes(e));
+    let goalScored = false;
 
     // tier-2: 실측상 claude -p(중앙값 ~11s)는 3s 주기를 못 따라온다.
     // 템플릿 즉시 출력이 우선, 각색은 replay 보강 라인으로 사후 합류 ([내부] 메모 ②)
@@ -164,6 +167,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
         const s = parseScoreFromGoalText(e.rawText, snap);
         if (s && state.isAnnounced(s.home, s.away)) continue;
         state.markAnnounced(s?.home ?? snap.homeScore, s?.away ?? snap.awayScore);
+        goalScored = true;
       }
       await logger.stream(renderEvent(e, snap, skin), STREAM_GAP_MS);
       if (REPLAY_CATEGORIES.has(e.category)) {
@@ -186,11 +190,22 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
       }
     }
 
+    // 골 애니메이션: tick의 정규 출력이 모두 끝난 뒤 fire-and-forget으로 시작 —
+    // 10초 연출이 폴링 케이던스를 1ms도 밀어내지 않는다. 다음 tick의 라인이
+    // 프레임 사이에 끼어들 수 있지만, 케이던스가 연출 순수성보다 우선이다.
+    if (goalScored && config.goalAnimation) {
+      // 덮어쓰지 않고 합류시킨다 — 재생 중 연속골(no-op 즉시 resolve)이 진행 중인
+      // 애니메이션 추적을 끊으면 FT 직전 최종 보고가 잔여 프레임과 교차할 수 있다
+      const prev = celebration;
+      const next = celebrateGoal(logger).catch(() => {});
+      celebration = Promise.allSettled([prev, next]).then(() => {});
+    }
+
     state.update(snap.state, snap.homeScore, snap.awayScore);
 
     if (snap.state === 'post') {
-      // 진행 중인 replay 각색을 잠깐 기다렸다가 최종 보고 후 자진 종료
-      await Promise.race([Promise.allSettled([...pendingReplays]), sleep(15_000)]);
+      // 진행 중인 replay 각색·골 애니메이션을 잠깐 기다렸다가 최종 보고 후 자진 종료
+      await Promise.race([Promise.allSettled([...pendingReplays, celebration]), sleep(15_000)]);
       await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20), skin), 300);
       state.cleanup();
       process.stdout.write(`[e2e-monitor] match ${eventId} finished — daemon exiting\n`);

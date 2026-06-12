@@ -83,6 +83,8 @@ export interface Config {
   skin?: string;
   league: string;
   logDir: string;
+  /** 골 순간 10초 위장 해제 애니메이션 (art/goal/*.txt). false면 기존 출력과 완전 동일 */
+  goalAnimation: boolean;
   pollIntervalSec: number; // 하한 10s — 코드에서 clamp
   tier2PollIntervalSec: number; // 하한 3s — 코드에서 clamp
   tier2: {
