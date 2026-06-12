@@ -1,0 +1,18 @@
+{
+  "skin": "ts-dev",
+  "league": "fifa.world",
+  "logDir": "~/.e2e-monitor",
+  "pollIntervalSec": 10,
+  "tier2PollIntervalSec": 3,
+  "tier2": {
+    "typeIds": [],
+    "lateGameMinute": 80,
+    "closeScoreDiff": 1,
+    "cooldownSec": 120
+  },
+  "narrator": {
+    "mode": "auto",
+    "model": "haiku",
+    "timeoutSec": 25
+  }
+}
