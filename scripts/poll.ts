@@ -2,6 +2,7 @@
 import { loadConfig } from '../src/config.js';
 import { runDaemon } from '../src/daemon.js';
 import { fetchScoreboard } from '../src/espn.js';
+import { runFollow } from '../src/follow.js';
 import { runReplay } from '../src/replay.js';
 
 const USAGE = `e2e-monitor — 전반전부터 후반전까지, 당신의 터미널은 일하고 있었습니다.
@@ -10,14 +11,18 @@ const USAGE = `e2e-monitor — 전반전부터 후반전까지, 당신의 터미
   npx tsx scripts/poll.ts list [--league <code>]          오늘 경기 목록
   npx tsx scripts/poll.ts daemon <eventId> [옵션] &        데몬 시작 (경기 종료 시 자진 종료)
   npx tsx scripts/poll.ts replay <eventId> [옵션] &        끝난 경기를 가짜 라이브로 압축 재생
+  npx tsx scripts/poll.ts follow <eventId> [옵션]          새 중계 라인 long-poll 1회분
+                                                          (마지막 줄 마커: [follow] cursor=<n> <status>)
 
 옵션:
   --league <code>   리그 코드 (기본 fifa.world)
   --config <path>   config.json 경로 (기본 ~/.e2e-monitor/config.json)
   --once            1 tick만 실행 (검증용, daemon 전용)
   --speed <n>       replay 압축 배율 (기본 15 — 90분 경기를 ~6분에)
+  --cursor <byte>   follow 시작 위치 (직전 마커의 cursor 값, 기본 0)
+  --wait <sec>      follow 새 데이터 대기 한도 (기본 60, 상한 75)
 
-중계 켜기:
+터미널에서 직접 보려면:
   tail -f ~/.e2e-monitor/match-<eventId>.log
 `;
 
@@ -47,6 +52,20 @@ async function main(): Promise<number> {
         `${e.id}  ${e.home.padEnd(4)} ${score.padStart(5)}  ${e.away.padEnd(4)} [${e.state}] ${e.detail}\n`,
       );
     }
+    return 0;
+  }
+
+  if (cmd === 'follow') {
+    const eventId = argv[1];
+    if (!eventId || eventId.startsWith('--')) {
+      process.stderr.write(USAGE);
+      return 1;
+    }
+    await runFollow(eventId, {
+      configPath: flag('config'),
+      cursor: Number(flag('cursor')) || 0,
+      waitSec: Number(flag('wait')) || undefined,
+    });
     return 0;
   }
 

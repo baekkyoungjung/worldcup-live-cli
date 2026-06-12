@@ -3,15 +3,33 @@ import path from 'node:path';
 
 const WRAP_COL = 100;
 
+export function matchLogPath(logDir: string, matchId: string): string {
+  return path.join(logDir, `match-${matchId}.log`);
+}
+
+/** 중계 종료 마커 — writer(daemon/replay)가 최종 보고까지 다 쓴 뒤에만 생성한다 */
+export function matchDonePath(logDir: string, matchId: string): string {
+  return path.join(logDir, `match-${matchId}.done`);
+}
+
+/** 현재 로그를 쓰는 프로세스 pid — follow가 idle/stalled를 구분하는 근거 */
+export function writerPidPath(logDir: string, matchId: string): string {
+  return path.join(logDir, `match-${matchId}.writer.pid`);
+}
+
 export class MatchLogger {
   readonly logPath: string;
   readonly rawPath: string;
+  private donePath: string;
+  private pidPath: string;
   private wrapIndent: number;
 
   constructor(logDir: string, matchId: string, wrapIndent: number) {
     fs.mkdirSync(logDir, { recursive: true });
-    this.logPath = path.join(logDir, `match-${matchId}.log`);
+    this.logPath = matchLogPath(logDir, matchId);
     this.rawPath = path.join(logDir, `match-${matchId}.raw.jsonl`);
+    this.donePath = matchDonePath(logDir, matchId);
+    this.pidPath = writerPidPath(logDir, matchId);
     // 음수면 repeat가 throw, WRAP_COL 이상이면 wrap이 무한 루프 — 스킨 입력은 신뢰하지 않는다
     this.wrapIndent = Number.isFinite(wrapIndent) ? Math.min(Math.max(0, Math.trunc(wrapIndent)), WRAP_COL - 40) : 8;
   }
@@ -58,6 +76,44 @@ export class MatchLogger {
       fs.appendFileSync(this.rawPath, JSON.stringify(entry) + '\n');
     } catch {
       // 디스크 장애에도 데몬은 죽지 않는다
+    }
+  }
+
+  /**
+   * 중계 종료 마커. 반드시 최종 보고의 마지막 라인 append가 끝난 뒤에 불러야 한다 —
+   * follow는 "done 존재 + EOF 도달"을 동시에 봐야 종료로 판정하지만, done이 보고
+   * 중간에 먼저 생기면 잔여 라인을 버리고 턴을 끝내는 race가 된다.
+   */
+  markDone(): void {
+    try {
+      fs.writeFileSync(this.donePath, new Date().toISOString());
+    } catch {
+      // 마커 실패 시 follow가 idle/stalled로 버틸 뿐 — 치명 아님
+    }
+  }
+
+  /** 이전 경기(또는 이전 재생)의 stale done 제거 — writer 기동 직후 호출 */
+  clearDone(): void {
+    try {
+      fs.unlinkSync(this.donePath);
+    } catch {
+      // 없으면 그만
+    }
+  }
+
+  markWriter(): void {
+    try {
+      fs.writeFileSync(this.pidPath, String(process.pid));
+    } catch {
+      // pid 마커 실패 — follow가 stalled로 오판할 수 있을 뿐, 중계는 계속된다
+    }
+  }
+
+  clearWriter(): void {
+    try {
+      fs.unlinkSync(this.pidPath);
+    } catch {
+      // 이미 없으면 그만
     }
   }
 

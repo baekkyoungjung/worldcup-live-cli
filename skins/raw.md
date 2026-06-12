@@ -49,7 +49,6 @@ setpiece.flavor = [{minute}] ○ {desc}
 setpiece.desc = 세트피스. 키커가 공을 내려놓는다
 
 generic.flavor = [{minute}] · {desc}
-generic.desc = {rawText}
 
 report.header = ━━ 최종 전적 (match {matchId}) ━━
 report.line =   {item}

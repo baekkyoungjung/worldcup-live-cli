@@ -34,9 +34,10 @@ wrapIndent: 11           # 긴 줄 줄바꿈 시 연속행 들여쓰기 칸수 (
 |----|------|-------------|
 | `kickoff.fact` `halftime.fact` `resume.fact` `fulltime.fact` | 권장 | `generic.flavor`로 폴백 |
 | `goal.flavor` `goal.fact` | 권장 | flavor는 `generic.flavor` 폴백, fact는 그 줄 생략 |
-| `goal.desc` 등 `<카테고리>.desc` | 선택 | `generic.desc` 폴백 — 각색 실패 시 쓰는 고정 묘사 |
+| `goal.desc` 등 `<카테고리>.desc` | **권장** | 각색(claude) 실패 시 쓰는 고정 묘사. **한국어로 쓸 것.** 없으면 시스템 내장 한국어 폴백(일부 type만) → 그것도 없으면 그 이벤트는 침묵 |
 | `penalty/var/red/yellow/sub/chance/setpiece.flavor` | 선택 | `generic.flavor` 폴백 |
-| `generic.flavor` `generic.desc` | **필수** | 없으면 다수 이벤트가 통째로 생략된다 |
+| `generic.flavor` | **필수** | 없으면 다수 이벤트가 통째로 생략된다 |
+| `generic.desc` | 비권장 | 정의하면 미분류 이벤트마다 같은 고정 문구가 반복된다. **`{rawText}` 사용 금지** — ESPN 영문 원문이 위장 로그에 그대로 샌다. 비워 두면 각색 실패한 미분류 이벤트는 침묵 처리(의도된 동작) |
 | `replay.flavor` | 권장 | 없으면 tier-2 사후 각색 보강 라인이 출력되지 않는다 |
 | `report.header` `report.line` `report.footer` | 권장 | 없으면 경기 종료 최종 보고가 생략된다 |
 
@@ -48,7 +49,8 @@ wrapIndent: 11           # 긴 줄 줄바꿈 시 연속행 들여쓰기 칸수 (
 `{time}`(HH:MM:SS) `{matchId}` `{venue}` `{homeTeam}` `{awayTeam}` `{homeAbbr}`
 `{awayAbbr}` `{homeScore}` `{awayScore}` `{minute}`("67'") `{minuteNum}`(67)
 `{player}` `{teamAbbr}` `{scoringAbbr}` `{concedingAbbr}` `{scoringTeam}`
-`{rawText}`(ESPN 원문) `{desc}`(각색 묘사 — flavor에 필수) `{item}`(report.line 전용)
+`{rawText}`(ESPN 영문 원문 — **desc/flavor에 쓰지 말 것**, 중계는 한국어가 원칙)
+`{desc}`(각색 묘사 — flavor에 필수) `{item}`(report.line 전용)
 
 오타 placeholder는 **빈 문자열로 무음 치환**된다. PR 전에 종료된 경기로
 `npx tsx scripts/poll.ts daemon <끝난 경기 id> --config <테스트 config>` 한 번 돌려

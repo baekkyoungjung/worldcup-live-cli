@@ -51,7 +51,6 @@ setpiece.flavor = [{time}] 안건 상정 — {minute} {desc}
 setpiece.desc = 정지 상황에서 재개합니다
 
 generic.flavor = [{time}] 메모 — {minute} {desc}
-generic.desc = {rawText}
 
 report.header = [{time}] ━ 회의록 요약 (회의 ID {matchId}) ━
 report.line = [{time}]   · {item}

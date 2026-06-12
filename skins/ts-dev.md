@@ -52,7 +52,6 @@ setpiece.flavor = {time} · queue {minute} {desc}
 setpiece.desc = 세트피스 준비. 키커가 공을 내려놓는다
 
 generic.flavor = {time} · trace {minute} {desc}
-generic.desc = {rawText}
 
 report.header = {time} ── coverage report ── match-{matchId} ─────────────
 report.line = {time}    {item}

@@ -41,7 +41,11 @@
 │  tier-2 상황에선 폴링 3s 단축 + 라인 단위 즉시 flush    │
 └──────────────────────────────────────────────────────┘
 
-소비는 tail 하나로 끝:
+소비 1 — Claude Code 세션 (스킬이 알아서):
+  follow 커맨드가 새 라인만 long-poll로 떼어 오고,
+  스킬이 그걸 세션에 그대로 흘려보낸다 (중복 출력 구조적 차단)
+
+소비 2 — 터미널:
 $ tail -f ~/.e2e-monitor/match-760415.log
 ```
 
@@ -92,12 +96,16 @@ npx tsx scripts/poll.ts list
 # 데몬 시작 (경기 종료 시 자동 종료 + 최종 보고 후 사망)
 npx tsx scripts/poll.ts daemon <eventId> &
 
-# 중계 켜기 = tail
+# 터미널에서 중계 켜기 = tail
 tail -f ~/.e2e-monitor/match-<eventId>.log
+
+# 새 중계 라인만 한 배치 떼어 오기 (Claude Code 스킬의 중계 루프가 쓰는 단위 호출)
+npx tsx scripts/poll.ts follow <eventId> --cursor 0 --wait 60
 ```
 
-Claude Code 안에서는 스킬 트리거("모니터 돌려줘", "경기 어떻게 돼가")로
-위 과정을 대신 시킬 수 있다.
+Claude Code 안에서는 스킬 트리거("모니터 돌려줘", "이전 경기 리플레이")가
+데몬 기동부터 세션 내 실시간 중계까지 전부 대신한다 — 스킬이 follow를 반복
+호출하며 새 라인을 세션에 그대로 흘려보내고, 경기가 끝나면 스코어 요약으로 마친다.
 
 ## 데이터 소스와 한계
 

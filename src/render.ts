@@ -87,15 +87,32 @@ function tpl(skin: Skin, key: string, fallbackKey?: string): string | null {
   return skin.templates[key] ?? (fallbackKey ? skin.templates[fallbackKey] : undefined) ?? null;
 }
 
-/** 이벤트 → 위장 로그 라인들. desc 미제공 시 스킨의 카테고리별 폴백 desc 사용 */
+/**
+ * 각색(claude)도 스킨 desc도 없을 때의 한국어 최후 폴백 — typeId 기준.
+ * ESPN raw 영문 텍스트는 어떤 경로로도 중계 라인에 싣지 않는다.
+ */
+const KO_DESC_BY_TYPE: Record<string, string> = {
+  '66': '파울 휘슬이 울린다, 흐름이 잠시 끊긴다',
+  '68': '부심 깃발이 올라간다 — 오프사이드',
+  '122': '핸드볼 선언',
+  '129': '경기가 잠시 멈춘다',
+  '130': '경기가 잠시 멈춘다',
+};
+
+/**
+ * 이벤트 → 위장 로그 라인들. desc 폴백 체인: 각색 → 스킨 desc → typeId 한국어 맵.
+ * 체인이 전부 비면 flavor 라인을 침묵시킨다 — 영문 raw를 흘리느니 버린다 (침묵도 위장).
+ */
 export function renderEvent(event: MatchEvent, snap: MatchSnapshot, skin: Skin, desc?: string | null): string[] {
   const cat = event.category;
-  const fallbackDesc = tpl(skin, `${cat}.desc`, 'generic.desc') ?? '{rawText}';
   const vars0 = buildVars(event, snap);
-  // rawText는 외부 입력 — 개행·마크다운이 한 줄 형식을 깨지 않도록 항상 위생 처리
-  const finalDesc = sanitizeDesc(
-    desc && desc.trim() ? desc : fillTemplate(fallbackDesc, vars0).trim() || event.rawText,
-  );
+  // 각색·스킨 desc 모두 외부 입력 — 개행·마크다운이 한 줄 형식을 깨지 않도록 항상 위생 처리
+  let finalDesc = desc && desc.trim() ? sanitizeDesc(desc) : '';
+  if (!finalDesc) {
+    const fallbackTpl = tpl(skin, `${cat}.desc`, 'generic.desc');
+    if (fallbackTpl) finalDesc = sanitizeDesc(fillTemplate(fallbackTpl, vars0).trim());
+  }
+  if (!finalDesc) finalDesc = KO_DESC_BY_TYPE[event.typeId ?? ''] ?? '';
   const vars = buildVars(event, snap, finalDesc);
 
   const lines: string[] = [];
@@ -105,7 +122,7 @@ export function renderEvent(event: MatchEvent, snap: MatchSnapshot, skin: Skin, 
     // 득점 팀을 모르는 골은 팀 귀속이 박힌 goal.flavor 대신 generic으로 — 틀린 사실을 찍지 않는다
     const flavorKey = cat === 'goal' && !event.teamAbbr ? 'generic.flavor' : `${cat}.flavor`;
     const flavor = tpl(skin, flavorKey, 'generic.flavor');
-    if (flavor) lines.push(fillTemplate(flavor, vars));
+    if (flavor && finalDesc) lines.push(fillTemplate(flavor, vars));
   }
   const fact = tpl(skin, `${cat}.fact`);
   if (fact) lines.push(fillTemplate(fact, vars));
@@ -151,7 +168,18 @@ function labelOf(e: MatchEvent): string {
       return '퇴장';
     case 'penalty':
       return 'PK';
+    case 'yellow':
+      return '경고';
+    case 'var':
+      return 'VAR';
+    case 'sub':
+      return '교체';
+    case 'chance':
+      return '기회';
+    case 'setpiece':
+      return '세트피스';
     default:
-      return e.typeText || e.category;
+      // typeText는 ESPN 영문 — 최종 보고에 영문을 흘리지 않는다
+      return '기록';
   }
 }

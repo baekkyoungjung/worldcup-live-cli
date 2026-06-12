@@ -38,9 +38,13 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
   const state = new MatchStateStore(config.logDir, eventId);
   const narrator = new Narrator(config);
 
+  // follow 소비자를 위한 마커: 이전 회차의 done은 지우고, 내가 writer임을 알린다
+  logger.clearDone();
+  logger.markWriter();
+
   process.stdout.write(
-    `[e2e-monitor] daemon up — match ${eventId}, skin ${skin.name}\n` +
-      `[e2e-monitor] tail -f ${logger.logPath}\n`,
+    `[e2e-monitor] 데몬 가동 — match ${eventId}, skin ${skin.name}\n` +
+      `[e2e-monitor] 터미널 시청: tail -f ${logger.logPath}\n`,
   );
 
   const pendingReplays = new Set<Promise<void>>();
@@ -97,6 +101,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
       await sleepRemainder(t0, intervalSec);
     }
   } finally {
+    logger.clearWriter();
     lock.release();
   }
 
@@ -207,8 +212,10 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
       // 진행 중인 replay 각색·골 애니메이션을 잠깐 기다렸다가 최종 보고 후 자진 종료
       await Promise.race([Promise.allSettled([...pendingReplays, celebration]), sleep(15_000)]);
       await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20), skin), 300);
+      // done은 반드시 최종 보고의 마지막 append 뒤에 — 먼저 찍으면 follow가 보고를 버리고 끝낸다
+      logger.markDone();
       state.cleanup();
-      process.stdout.write(`[e2e-monitor] match ${eventId} finished — daemon exiting\n`);
+      process.stdout.write(`[e2e-monitor] match ${eventId} 종료 — 데몬 자진 종료\n`);
       return true;
     }
     return false;

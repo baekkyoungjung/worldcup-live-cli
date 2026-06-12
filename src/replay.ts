@@ -7,7 +7,7 @@ import { Narrator } from './narrate.js';
 import { renderEvent, renderFinalReport, renderReplay } from './render.js';
 import { resolveSkin } from './skin.js';
 import { classify } from './tier.js';
-import type { MatchEvent, MatchSnapshot } from './types.js';
+import type { Config, MatchEvent, MatchSnapshot, Skin } from './types.js';
 
 const STREAM_GAP_MS = 600;
 const MIN_GAP_MS = 700; // 같은 분 안의 연속 이벤트도 숨은 쉬고 나온다
@@ -33,6 +33,24 @@ export async function runReplay(eventId: string, opts: ReplayOptions = {}): Prom
   const logger = new MatchLogger(config.logDir, eventId, skin.wrapIndent);
   const narrator = new Narrator(config);
 
+  // follow 소비자 마커는 fetch 전에 — 같은 경기의 stale done이 새 재생을 즉시 done으로 오판시키지 않게
+  logger.clearDone();
+  logger.markWriter();
+  try {
+    await runReplayBody(eventId, config, speed, skin, logger, narrator);
+  } finally {
+    logger.clearWriter();
+  }
+}
+
+async function runReplayBody(
+  eventId: string,
+  config: Config,
+  speed: number,
+  skin: Skin,
+  logger: MatchLogger,
+  narrator: Narrator,
+): Promise<void> {
   const res = await fetchSummary(config.league, eventId);
   if (!res.ok) {
     process.stderr.write(`[e2e-monitor] summary 실패: ${res.error}\n`);
@@ -60,9 +78,9 @@ export async function runReplay(eventId: string, opts: ReplayOptions = {}): Prom
     .filter((e) => e.tier > 0);
 
   process.stdout.write(
-    `[e2e-monitor] replay — match ${eventId} (${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}), ` +
+    `[e2e-monitor] 리플레이 시작 — match ${eventId} (${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}), ` +
       `x${speed}, ~${Math.ceil((95 / speed) * 10) / 10}분 예상\n` +
-      `[e2e-monitor] tail -f ${logger.logPath}\n`,
+      `[e2e-monitor] 터미널 시청: tail -f ${logger.logPath}\n`,
   );
 
   // 진행 중 스코어를 직접 굴린다 — 스냅샷은 최종 스코어라 골 fact에 그대로 쓰면 스포일러다
@@ -136,7 +154,9 @@ export async function runReplay(eventId: string, opts: ReplayOptions = {}): Prom
 
   await Promise.race([Promise.allSettled(pendingReplays), sleep(15_000)]);
   await logger.stream(renderFinalReport(snap, highlights.slice(0, 20), skin), 300);
-  process.stdout.write(`[e2e-monitor] replay finished — ${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}\n`);
+  // done은 반드시 최종 보고의 마지막 append 뒤에 (daemon과 동일한 순서 보장)
+  logger.markDone();
+  process.stdout.write(`[e2e-monitor] 리플레이 종료 — ${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}\n`);
 }
 
 /** "Goal! Mexico 2, South Africa 0." → 진행 스코어 갱신. 파싱 실패 시 득점 팀 +1 폴백 */
