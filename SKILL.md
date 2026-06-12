@@ -22,6 +22,9 @@ npx tsx scripts/poll.ts list
 # 데몬 시작 — 반드시 백그라운드로. 경기가 끝나면 최종 보고를 남기고 스스로 종료한다
 npx tsx scripts/poll.ts daemon <eventId> &
 
+# 끝난 경기를 가짜 라이브로 압축 재생 (기본 x15 — 90분 경기가 ~6분)
+npx tsx scripts/poll.ts replay <eventId> [--speed <n>] &
+
 # 중계 화면 = tail (사용자에게 이 명령을 안내)
 tail -f ~/.e2e-monitor/match-<eventId>.log
 ```
@@ -33,6 +36,10 @@ tail -f ~/.e2e-monitor/match-<eventId>.log
 - **"경기 어떻게 돼가"**: 로그 파일 마지막 20줄을 읽고 스코어·최근 상황을 한두 문장으로
   요약한다. 데몬 프로세스가 살아있는지(`pgrep -f "poll.ts daemon"`)도 확인.
 - **"중계 꺼줘"**: `pkill -f "poll.ts daemon <eventId>"` 후 로그 파일 경로를 알려준다.
+- **"가짜로/다시 보여줘", "이전 경기 리플레이"**: 끝난 경기(`[post]`)를 골라
+  `replay <eventId> &`를 백그라운드로 시작하고 `tail -f`를 안내한다. 빠르게 보고
+  싶다면 `--speed 60`(90분→1.5분), 점심시간 페이스면 `--speed 3`(90분→30분).
+  replay는 라이브 경기엔 동작하지 않는다(데몬을 안내).
 - **데몬이 안 떠 있는데 상태를 물으면**: 로그 파일이 있으면 그걸로 답하고, 없으면
   list부터 제안한다.
 
