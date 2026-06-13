@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace-manifest.json",
+  "name": "sajang-molae",
+  "description": "사장 몰래 — 업무 화면으로 위장한 월드컵 중계 스킬 마켓플레이스",
+  "owner": {
+    "name": "baekkyoungjung",
+    "url": "https://github.com/baekkyoungjung/sajang-molae"
+  },
+  "plugins": [
+    {
+      "name": "e2e-monitor",
+      "source": "./",
+      "description": "월드컵 경기를 직군 산출물로 위장한 텍스트 중계로 Claude Code 세션에 실시간으로 흘려보낸다.",
+      "category": "fun",
+      "keywords": ["football", "worldcup", "espn", "live", "camouflage"]
+    }
+  ]
+}

@@ -6,8 +6,9 @@ node_modules/
 .env.local
 .env.*.local
 
-# Build
-dist/
+# Build — dist/poll.mjs는 스킬 배포물이라 커밋한다(설치 후 zero-install 실행). 나머지 빌드 산출물만 무시.
+dist/*
+!dist/poll.mjs
 build/
 .next/
 out/
