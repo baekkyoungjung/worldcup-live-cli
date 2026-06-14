@@ -1,7 +1,7 @@
 {
-  "name": "e2e-monitor",
+  "name": "worldcup-live-cli",
   "version": "1.0.0",
-  "description": "전반전부터 후반전까지, 당신의 터미널은 일하고 있었습니다.",
+  "description": "Watch football like you code — live World Cup commentary streamed into your Claude Code session.",
   "private": true,
   "type": "module",
   "scripts": {

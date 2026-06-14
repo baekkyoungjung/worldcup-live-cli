@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { HARD_MIN_POLL_SEC, HARD_MIN_TIER2_POLL_SEC, type Config } from './types.js';
 
-export const CONFIG_DIR = path.join(os.homedir(), '.e2e-monitor');
+export const CONFIG_DIR = path.join(os.homedir(), '.worldcup-live-cli');
 
 const DEFAULTS: Config = {
   league: 'fifa.world',
@@ -31,7 +31,7 @@ export function loadConfig(configPath?: string): Config {
     try {
       user = JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) {
-      process.stderr.write(`[e2e-monitor] config 파싱 실패(${e}) — 기본값 사용\n`);
+      process.stderr.write(`[worldcup-live-cli] config 파싱 실패(${e}) — 기본값 사용\n`);
     }
   }
   const merged: Config = {

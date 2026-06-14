@@ -10,7 +10,7 @@ var HARD_MIN_POLL_SEC = 10;
 var HARD_MIN_TIER2_POLL_SEC = 3;
 
 // src/config.ts
-var CONFIG_DIR = path.join(os.homedir(), ".e2e-monitor");
+var CONFIG_DIR = path.join(os.homedir(), ".worldcup-live-cli");
 var DEFAULTS = {
   league: "fifa.world",
   logDir: CONFIG_DIR,
@@ -36,7 +36,7 @@ function loadConfig(configPath) {
     try {
       user = JSON.parse(fs.readFileSync(file, "utf8"));
     } catch (e) {
-      process.stderr.write(`[e2e-monitor] config \uD30C\uC2F1 \uC2E4\uD328(${e}) \u2014 \uAE30\uBCF8\uAC12 \uC0AC\uC6A9
+      process.stderr.write(`[worldcup-live-cli] config \uD30C\uC2F1 \uC2E4\uD328(${e}) \u2014 \uAE30\uBCF8\uAC12 \uC0AC\uC6A9
 `);
     }
   }
@@ -73,7 +73,7 @@ function expandHome(p) {
 
 // src/espn.ts
 var BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer";
-var UA = "e2e-monitor/1.0 (+https://github.com)";
+var UA = "worldcup-live-cli/1.0 (+https://github.com)";
 async function getJson(url) {
   try {
     const res = await fetch(url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(15e3) });
@@ -874,7 +874,7 @@ async function runDaemon(eventId, opts = {}) {
   if (opts.league) config.league = opts.league;
   const lock = acquireLock(config.logDir, eventId);
   if (!lock.ok) {
-    process.stderr.write(`[e2e-monitor] match ${eventId}\uC740 \uC774\uBBF8 \uB370\uBAAC(pid ${lock.pid})\uC774 \uCD94\uC801 \uC911
+    process.stderr.write(`[worldcup-live-cli] match ${eventId}\uC740 \uC774\uBBF8 \uB370\uBAAC(pid ${lock.pid})\uC774 \uCD94\uC801 \uC911
 `);
     return;
   }
@@ -884,8 +884,8 @@ async function runDaemon(eventId, opts = {}) {
   logger.clearDone();
   logger.markWriter();
   process.stdout.write(
-    `[e2e-monitor] \uB370\uBAAC \uAC00\uB3D9 \u2014 match ${eventId}
-[e2e-monitor] \uD130\uBBF8\uB110 \uC2DC\uCCAD: tail -f ${logger.logPath}
+    `[worldcup-live-cli] \uB370\uBAAC \uAC00\uB3D9 \u2014 match ${eventId}
+[worldcup-live-cli] \uD130\uBBF8\uB110 \uC2DC\uCCAD: tail -f ${logger.logPath}
 `
   );
   let fastUntil = 0;
@@ -993,7 +993,7 @@ async function runDaemon(eventId, opts = {}) {
       await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20)), 300);
       logger.markDone();
       state.cleanup();
-      process.stdout.write(`[e2e-monitor] match ${eventId} \uC885\uB8CC \u2014 \uB370\uBAAC \uC790\uC9C4 \uC885\uB8CC
+      process.stdout.write(`[worldcup-live-cli] match ${eventId} \uC885\uB8CC \u2014 \uB370\uBAAC \uC790\uC9C4 \uC885\uB8CC
 `);
       return { finished: true, emitted: true };
     }
@@ -1170,7 +1170,7 @@ async function runReplay(eventId, opts = {}) {
 async function runReplayBody(eventId, config, speed, logger) {
   const res = await fetchSummary(config.league, eventId);
   if (!res.ok) {
-    process.stderr.write(`[e2e-monitor] summary \uC2E4\uD328: ${res.error}
+    process.stderr.write(`[worldcup-live-cli] summary \uC2E4\uD328: ${res.error}
 `);
     process.exitCode = 1;
     return;
@@ -1178,7 +1178,7 @@ async function runReplayBody(eventId, config, speed, logger) {
   const snap = res.data;
   if (snap.state !== "post") {
     process.stderr.write(
-      `[e2e-monitor] match ${eventId}\uB294 \uC544\uC9C1 ${snap.state} \u2014 replay\uB294 \uB05D\uB09C \uACBD\uAE30 \uC804\uC6A9, \uB77C\uC774\uBE0C\uB294 daemon\uC744 \uC4F0\uC790
+      `[worldcup-live-cli] match ${eventId}\uB294 \uC544\uC9C1 ${snap.state} \u2014 replay\uB294 \uB05D\uB09C \uACBD\uAE30 \uC804\uC6A9, \uB77C\uC774\uBE0C\uB294 daemon\uC744 \uC4F0\uC790
 `
     );
     process.exitCode = 1;
@@ -1190,8 +1190,8 @@ async function runReplayBody(eventId, config, speed, logger) {
   }
   const events = snap.items.map((i) => classify(i, config)).filter((e) => e.tier > 0);
   process.stdout.write(
-    `[e2e-monitor] \uB9AC\uD50C\uB808\uC774 \uC2DC\uC791 \u2014 match ${eventId} (${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}), x${speed}, ~${Math.ceil(95 / speed * 10) / 10}\uBD84 \uC608\uC0C1
-[e2e-monitor] \uD130\uBBF8\uB110 \uC2DC\uCCAD: tail -f ${logger.logPath}
+    `[worldcup-live-cli] \uB9AC\uD50C\uB808\uC774 \uC2DC\uC791 \u2014 match ${eventId} (${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}), x${speed}, ~${Math.ceil(95 / speed * 10) / 10}\uBD84 \uC608\uC0C1
+[worldcup-live-cli] \uD130\uBBF8\uB110 \uC2DC\uCCAD: tail -f ${logger.logPath}
 `
   );
   const running = { ...snap, homeScore: 0, awayScore: 0 };
@@ -1232,7 +1232,7 @@ async function runReplayBody(eventId, config, speed, logger) {
   }
   await logger.stream(renderFinalReport(snap, highlights.slice(0, 20)), 300);
   logger.markDone();
-  process.stdout.write(`[e2e-monitor] \uB9AC\uD50C\uB808\uC774 \uC885\uB8CC \u2014 ${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}
+  process.stdout.write(`[worldcup-live-cli] \uB9AC\uD50C\uB808\uC774 \uC885\uB8CC \u2014 ${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}
 `);
 }
 async function pacedGap(gapMs, logger) {
@@ -1268,7 +1268,7 @@ function overlaps(a, b) {
 }
 
 // scripts/poll.ts
-var USAGE = `e2e-monitor \u2014 \uC804\uBC18\uC804\uBD80\uD130 \uD6C4\uBC18\uC804\uAE4C\uC9C0, \uB2F9\uC2E0\uC758 \uD130\uBBF8\uB110\uC740 \uC77C\uD558\uACE0 \uC788\uC5C8\uC2B5\uB2C8\uB2E4.
+var USAGE = `worldcup-live-cli \u2014 watch football like you code.
 
 \uC0AC\uC6A9\uBC95:
   npx tsx scripts/poll.ts list [--league <code>]          \uC624\uB298 \uACBD\uAE30 \uBAA9\uB85D
@@ -1279,14 +1279,14 @@ var USAGE = `e2e-monitor \u2014 \uC804\uBC18\uC804\uBD80\uD130 \uD6C4\uBC18\uC80
 
 \uC635\uC158:
   --league <code>   \uB9AC\uADF8 \uCF54\uB4DC (\uAE30\uBCF8 fifa.world)
-  --config <path>   config.json \uACBD\uB85C (\uAE30\uBCF8 ~/.e2e-monitor/config.json)
+  --config <path>   config.json \uACBD\uB85C (\uAE30\uBCF8 ~/.worldcup-live-cli/config.json)
   --once            1 tick\uB9CC \uC2E4\uD589 (\uAC80\uC99D\uC6A9, daemon \uC804\uC6A9)
   --speed <n>       replay \uC555\uCD95 \uBC30\uC728 (\uAE30\uBCF8 15 \u2014 90\uBD84 \uACBD\uAE30\uB97C ~6\uBD84\uC5D0)
   --cursor <byte>   follow \uC2DC\uC791 \uC704\uCE58 (\uC9C1\uC804 \uB9C8\uCEE4\uC758 cursor \uAC12, \uAE30\uBCF8 0)
   --wait <sec>      follow \uC0C8 \uB370\uC774\uD130 \uB300\uAE30 \uD55C\uB3C4 (\uAE30\uBCF8 60, \uC0C1\uD55C 75)
 
 \uD130\uBBF8\uB110\uC5D0\uC11C \uC9C1\uC811 \uBCF4\uB824\uBA74:
-  tail -f ~/.e2e-monitor/match-<eventId>.log
+  tail -f ~/.worldcup-live-cli/match-<eventId>.log
 `;
 async function main() {
   const argv = process.argv.slice(2);
@@ -1356,7 +1356,7 @@ async function main() {
   return cmd === void 0 || cmd === "help" || cmd === "--help" ? 0 : 1;
 }
 main().then((code) => process.exit(code)).catch((e) => {
-  process.stderr.write(`[e2e-monitor] fatal: ${e?.stack ?? e}
+  process.stderr.write(`[worldcup-live-cli] fatal: ${e?.stack ?? e}
 `);
   process.exit(1);
 });

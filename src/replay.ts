@@ -40,14 +40,14 @@ export async function runReplay(eventId: string, opts: ReplayOptions = {}): Prom
 async function runReplayBody(eventId: string, config: Config, speed: number, logger: MatchLogger): Promise<void> {
   const res = await fetchSummary(config.league, eventId);
   if (!res.ok) {
-    process.stderr.write(`[e2e-monitor] summary 실패: ${res.error}\n`);
+    process.stderr.write(`[worldcup-live-cli] summary 실패: ${res.error}\n`);
     process.exitCode = 1;
     return;
   }
   const snap = res.data;
   if (snap.state !== 'post') {
     process.stderr.write(
-      `[e2e-monitor] match ${eventId}는 아직 ${snap.state} — replay는 끝난 경기 전용, 라이브는 daemon을 쓰자\n`,
+      `[worldcup-live-cli] match ${eventId}는 아직 ${snap.state} — replay는 끝난 경기 전용, 라이브는 daemon을 쓰자\n`,
     );
     process.exitCode = 1;
     return;
@@ -62,9 +62,9 @@ async function runReplayBody(eventId: string, config: Config, speed: number, log
   const events = snap.items.map((i) => classify(i, config)).filter((e) => e.tier > 0);
 
   process.stdout.write(
-    `[e2e-monitor] 리플레이 시작 — match ${eventId} (${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}), ` +
+    `[worldcup-live-cli] 리플레이 시작 — match ${eventId} (${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}), ` +
       `x${speed}, ~${Math.ceil((95 / speed) * 10) / 10}분 예상\n` +
-      `[e2e-monitor] 터미널 시청: tail -f ${logger.logPath}\n`,
+      `[worldcup-live-cli] 터미널 시청: tail -f ${logger.logPath}\n`,
   );
 
   // 진행 스코어를 직접 굴린다 — 스냅샷은 최종 스코어라 골 fact에 그대로 쓰면 스포일러다
@@ -112,7 +112,7 @@ async function runReplayBody(eventId: string, config: Config, speed: number, log
 
   await logger.stream(renderFinalReport(snap, highlights.slice(0, 20)), 300);
   logger.markDone();
-  process.stdout.write(`[e2e-monitor] 리플레이 종료 — ${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}\n`);
+  process.stdout.write(`[worldcup-live-cli] 리플레이 종료 — ${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}\n`);
 }
 
 /** 이벤트 사이의 긴 공백을 앰비언트 멘트로 메우며 대기한다 — 정적을 없앤다 */

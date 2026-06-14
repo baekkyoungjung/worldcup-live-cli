@@ -1,7 +1,7 @@
 import type { MatchSnapshot, MatchState, RawItem } from './types.js';
 
 const BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
-const UA = 'e2e-monitor/1.0 (+https://github.com)';
+const UA = 'worldcup-live-cli/1.0 (+https://github.com)';
 
 export interface ScoreboardEntry {
   id: string;

@@ -5,7 +5,7 @@ import { fetchScoreboard } from '../src/espn.js';
 import { runFollow } from '../src/follow.js';
 import { runReplay } from '../src/replay.js';
 
-const USAGE = `e2e-monitor — 전반전부터 후반전까지, 당신의 터미널은 일하고 있었습니다.
+const USAGE = `worldcup-live-cli — watch football like you code.
 
 사용법:
   npx tsx scripts/poll.ts list [--league <code>]          오늘 경기 목록
@@ -16,14 +16,14 @@ const USAGE = `e2e-monitor — 전반전부터 후반전까지, 당신의 터미
 
 옵션:
   --league <code>   리그 코드 (기본 fifa.world)
-  --config <path>   config.json 경로 (기본 ~/.e2e-monitor/config.json)
+  --config <path>   config.json 경로 (기본 ~/.worldcup-live-cli/config.json)
   --once            1 tick만 실행 (검증용, daemon 전용)
   --speed <n>       replay 압축 배율 (기본 15 — 90분 경기를 ~6분에)
   --cursor <byte>   follow 시작 위치 (직전 마커의 cursor 값, 기본 0)
   --wait <sec>      follow 새 데이터 대기 한도 (기본 60, 상한 75)
 
 터미널에서 직접 보려면:
-  tail -f ~/.e2e-monitor/match-<eventId>.log
+  tail -f ~/.worldcup-live-cli/match-<eventId>.log
 `;
 
 async function main(): Promise<number> {
@@ -99,6 +99,6 @@ main()
   .then((code) => process.exit(code))
   .catch((e) => {
     // 마지막 안전망 — 그래도 죽어야 한다면 이유는 남긴다
-    process.stderr.write(`[e2e-monitor] fatal: ${e?.stack ?? e}\n`);
+    process.stderr.write(`[worldcup-live-cli] fatal: ${e?.stack ?? e}\n`);
     process.exit(1);
   });

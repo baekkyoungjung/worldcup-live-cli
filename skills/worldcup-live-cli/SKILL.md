@@ -1,16 +1,19 @@
 ---
-name: e2e-monitor
+name: worldcup-live-cli
 description: >
   월드컵 경기를 로거(log/warn/error/CRITICAL) 형식의 실시간 텍스트 중계로 흘려보내는
   백그라운드 데몬을 관리하고, 그 중계를 Claude Code 세션 안에 끊김 없이 띄운다.
+  "코딩하는 것처럼 축구를 본다" — 별도 화면·컨텍스트 전환 없이 세션 안에서 본다.
   "모니터 돌려줘", "중계 시작", "경기 어떻게 돼가", "오늘 경기 뭐 있어",
   "경기 목록", "중계 꺼줘", "이전 경기 리플레이", "가짜로 보여줘",
-  "e2e-monitor" 등 경기 모니터링 요청 시 사용.
+  "watch the match", "start the live feed", "what's the score",
+  "today's matches", "replay last game", "stop the feed",
+  "worldcup-live-cli" 등 경기 모니터링 요청 시 사용.
 ---
 
-# e2e-monitor
+# worldcup-live-cli
 
-데몬이 ESPN 비공식 API를 폴링해 `~/.e2e-monitor/match-<eventId>.log`에 로거형 중계를
+데몬이 ESPN 비공식 API를 폴링해 `~/.worldcup-live-cli/match-<eventId>.log`에 로거형 중계를
 append한다. **중계의 소비자는 이 스킬 자신이다** — `follow`로 새 라인만 떼어 와 세션에
 그대로 출력하고, 10분마다 직전 구간을 recap한다. **사용자에게 tail 명령을 안내하고 턴을
 끝내는 것은 이 스킬의 실패다.**
@@ -89,7 +92,7 @@ node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" follow <eventId> --cursor <byte> --wait
   백그라운드로 시작하고 같은 루프에 진입한다. 빠르게 보려면 `--speed 60`. replay는 라이브엔
   동작하지 않는다(daemon으로 안내).
 - **"경기 어떻게 돼가"** (루프가 안 돌 때): 로그 마지막 20줄을 읽고 스코어·최근 상황을 한두
-  문장으로 요약한 뒤, 원하면 **현재 파일 크기**(`wc -c < ~/.e2e-monitor/match-<id>.log`)를
+  문장으로 요약한 뒤, 원하면 **현재 파일 크기**(`wc -c < ~/.worldcup-live-cli/match-<id>.log`)를
   cursor로 루프에 합류한다 — 지나간 중계를 재방송하지 않는다.
 - **"중계 꺼줘"**: `pkill -f "poll.mjs daemon <eventId>"` 후 로그 경로를 알려준다.
 

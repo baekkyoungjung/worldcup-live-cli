@@ -1,16 +1,16 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
-  "name": "e2e-monitor",
-  "displayName": "e2e-monitor",
+  "name": "worldcup-live-cli",
+  "displayName": "worldcup-live-cli",
   "version": "1.1.1",
-  "description": "월드컵 경기를 로거(log/warn/error/CRITICAL) 형식의 실시간 텍스트 중계로 Claude Code 세션에 흘려보낸다. ESPN 비공식 API 폴링 → severity 로그 + 10초 앰비언트 + 10분/하프타임 recap.",
+  "description": "Watch football like you code. World Cup matches streamed into your Claude Code session as logger-style live text (log/warn/error/CRITICAL) — no second screen, no context switch. ESPN polling → severity logs + 10s ambient + 10min/half-time recap.",
   "author": {
     "name": "baekkyoungjung",
     "url": "https://github.com/baekkyoungjung"
   },
-  "homepage": "https://github.com/baekkyoungjung/sajang-molae",
-  "repository": "https://github.com/baekkyoungjung/sajang-molae",
+  "homepage": "https://github.com/baekkyoungjung/worldcup-live-cli",
+  "repository": "https://github.com/baekkyoungjung/worldcup-live-cli",
   "license": "MIT",
-  "keywords": ["football", "worldcup", "espn", "live", "camouflage"],
+  "keywords": ["football", "soccer", "worldcup", "espn", "live", "cli", "claude-code"],
   "skills": "./skills/"
 }

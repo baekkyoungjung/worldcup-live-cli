@@ -26,7 +26,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
   // 같은 경기에 데몬 둘이 붙으면 로그 중복·state 경쟁 — 두 번째는 정중히 거절
   const lock = acquireLock(config.logDir, eventId);
   if (!lock.ok) {
-    process.stderr.write(`[e2e-monitor] match ${eventId}은 이미 데몬(pid ${lock.pid})이 추적 중\n`);
+    process.stderr.write(`[worldcup-live-cli] match ${eventId}은 이미 데몬(pid ${lock.pid})이 추적 중\n`);
     return;
   }
 
@@ -38,8 +38,8 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
   logger.markWriter();
 
   process.stdout.write(
-    `[e2e-monitor] 데몬 가동 — match ${eventId}\n` +
-      `[e2e-monitor] 터미널 시청: tail -f ${logger.logPath}\n`,
+    `[worldcup-live-cli] 데몬 가동 — match ${eventId}\n` +
+      `[worldcup-live-cli] 터미널 시청: tail -f ${logger.logPath}\n`,
   );
 
   let fastUntil = 0;
@@ -178,7 +178,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
       await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20)), 300);
       logger.markDone();
       state.cleanup();
-      process.stdout.write(`[e2e-monitor] match ${eventId} 종료 — 데몬 자진 종료\n`);
+      process.stdout.write(`[worldcup-live-cli] match ${eventId} 종료 — 데몬 자진 종료\n`);
       return { finished: true, emitted: true };
     }
     return { finished: false, emitted };

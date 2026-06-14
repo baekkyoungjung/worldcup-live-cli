@@ -1,18 +1,18 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace-manifest.json",
-  "name": "sajang-molae",
-  "description": "사장 몰래 — 업무 화면으로 위장한 월드컵 중계 스킬 마켓플레이스",
+  "name": "worldcup-live-cli",
+  "description": "Watch football like you code — live World Cup commentary streamed into your Claude Code session as logger output.",
   "owner": {
     "name": "baekkyoungjung",
-    "url": "https://github.com/baekkyoungjung/sajang-molae"
+    "url": "https://github.com/baekkyoungjung/worldcup-live-cli"
   },
   "plugins": [
     {
-      "name": "e2e-monitor",
+      "name": "worldcup-live-cli",
       "source": "./",
-      "description": "월드컵 경기를 직군 산출물로 위장한 텍스트 중계로 Claude Code 세션에 실시간으로 흘려보낸다.",
+      "description": "World Cup matches streamed into your Claude Code session as logger-style live text — no second screen, no context switch.",
       "category": "fun",
-      "keywords": ["football", "worldcup", "espn", "live", "camouflage"]
+      "keywords": ["football", "soccer", "worldcup", "espn", "live", "cli", "claude-code"]
     }
   ]
 }
