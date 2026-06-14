@@ -14,9 +14,9 @@ var CONFIG_DIR = path.join(os.homedir(), ".e2e-monitor");
 var DEFAULTS = {
   league: "fifa.world",
   logDir: CONFIG_DIR,
-  goalAnimation: true,
   pollIntervalSec: 10,
   tier2PollIntervalSec: 3,
+  ambientIntervalSec: 10,
   tier2: {
     typeIds: [],
     lateGameMinute: 80,
@@ -51,6 +51,7 @@ function loadConfig(configPath) {
     HARD_MIN_TIER2_POLL_SEC,
     Number(merged.tier2PollIntervalSec) || HARD_MIN_TIER2_POLL_SEC
   );
+  merged.ambientIntervalSec = Math.max(3, finiteOr(merged.ambientIntervalSec, DEFAULTS.ambientIntervalSec));
   merged.tier2.typeIds = Array.isArray(merged.tier2.typeIds) ? merged.tier2.typeIds.map(String) : [];
   merged.tier2.lateGameMinute = finiteOr(merged.tier2.lateGameMinute, DEFAULTS.tier2.lateGameMinute);
   merged.tier2.closeScoreDiff = finiteOr(merged.tier2.closeScoreDiff, DEFAULTS.tier2.closeScoreDiff);
@@ -58,10 +59,8 @@ function loadConfig(configPath) {
   merged.narrator.timeoutSec = Math.max(5, finiteOr(merged.narrator.timeoutSec, DEFAULTS.narrator.timeoutSec));
   if (!["auto", "claude", "template"].includes(merged.narrator.mode)) merged.narrator.mode = "auto";
   merged.narrator.model = typeof merged.narrator.model === "string" ? merged.narrator.model : DEFAULTS.narrator.model;
-  merged.goalAnimation = merged.goalAnimation !== false;
   merged.league = typeof merged.league === "string" && merged.league ? merged.league : DEFAULTS.league;
   merged.logDir = expandHome(typeof merged.logDir === "string" && merged.logDir ? merged.logDir : DEFAULTS.logDir);
-  merged.skin = typeof merged.skin === "string" ? merged.skin : void 0;
   return merged;
 }
 function finiteOr(v, fallback) {
@@ -71,288 +70,6 @@ function finiteOr(v, fallback) {
 function expandHome(p) {
   return p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p;
 }
-
-// src/celebrate.ts
-import fs3 from "node:fs";
-import path3 from "node:path";
-import { fileURLToPath } from "node:url";
-
-// src/logger.ts
-import fs2 from "node:fs";
-import path2 from "node:path";
-var WRAP_COL = 100;
-function matchLogPath(logDir, matchId) {
-  return path2.join(logDir, `match-${matchId}.log`);
-}
-function matchDonePath(logDir, matchId) {
-  return path2.join(logDir, `match-${matchId}.done`);
-}
-function writerPidPath(logDir, matchId) {
-  return path2.join(logDir, `match-${matchId}.writer.pid`);
-}
-var MatchLogger = class {
-  logPath;
-  rawPath;
-  donePath;
-  pidPath;
-  wrapIndent;
-  constructor(logDir, matchId, wrapIndent) {
-    fs2.mkdirSync(logDir, { recursive: true });
-    this.logPath = matchLogPath(logDir, matchId);
-    this.rawPath = path2.join(logDir, `match-${matchId}.raw.jsonl`);
-    this.donePath = matchDonePath(logDir, matchId);
-    this.pidPath = writerPidPath(logDir, matchId);
-    this.wrapIndent = Number.isFinite(wrapIndent) ? Math.min(Math.max(0, Math.trunc(wrapIndent)), WRAP_COL - 40) : 8;
-  }
-  /** 위장 로그 한 줄. 길면 wrapIndent 들여쓰기로 줄바꿈 — README 예시의 2행 포맷 */
-  line(text) {
-    try {
-      fs2.appendFileSync(this.logPath, this.wrap(text) + "\n");
-    } catch {
-    }
-  }
-  /**
-   * tier-2 스트리밍: 여러 줄을 호흡 끊어 한 줄씩 flush.
-   * 줄 사이 지연은 캐스터의 호흡 — 다음 폴링 주기를 침범하지 않는 범위로 clamp.
-   */
-  async stream(lines, gapMs) {
-    for (let i = 0; i < lines.length; i++) {
-      if (i > 0) await sleep(gapMs);
-      this.line(lines[i]);
-    }
-  }
-  /**
-   * 미리 조판된 텍스트(골 애니메이션 프레임)의 raw append — wrap 없이 그대로.
-   * ANSI 색 코드가 길이 계산에 섞이면 wrap이 아트를 찢는다.
-   */
-  art(text) {
-    try {
-      fs2.appendFileSync(this.logPath, text + "\n");
-    } catch {
-    }
-  }
-  /**
-   * 위장 로그를 오염시키지 않는 사이드카. 스키마 변경·장애 시 raw JSON은 여기 쌓인다.
-   * (위장 원칙: 메인 로그에 이벤트가 아닌 것을 흘리지 않는다)
-   */
-  raw(kind, payload) {
-    const entry = { ts: (/* @__PURE__ */ new Date()).toISOString(), kind, payload };
-    try {
-      fs2.appendFileSync(this.rawPath, JSON.stringify(entry) + "\n");
-    } catch {
-    }
-  }
-  /**
-   * 중계 종료 마커. 반드시 최종 보고의 마지막 라인 append가 끝난 뒤에 불러야 한다 —
-   * follow는 "done 존재 + EOF 도달"을 동시에 봐야 종료로 판정하지만, done이 보고
-   * 중간에 먼저 생기면 잔여 라인을 버리고 턴을 끝내는 race가 된다.
-   */
-  markDone() {
-    try {
-      fs2.writeFileSync(this.donePath, (/* @__PURE__ */ new Date()).toISOString());
-    } catch {
-    }
-  }
-  /** 이전 경기(또는 이전 재생)의 stale done 제거 — writer 기동 직후 호출 */
-  clearDone() {
-    try {
-      fs2.unlinkSync(this.donePath);
-    } catch {
-    }
-  }
-  markWriter() {
-    try {
-      fs2.writeFileSync(this.pidPath, String(process.pid));
-    } catch {
-    }
-  }
-  clearWriter() {
-    try {
-      fs2.unlinkSync(this.pidPath);
-    } catch {
-    }
-  }
-  wrap(text) {
-    if (text.length <= WRAP_COL) return text;
-    if (WRAP_COL - this.wrapIndent <= 0) return text;
-    const indent = " ".repeat(this.wrapIndent);
-    const out = [];
-    let rest = text;
-    let first = true;
-    while (rest.length > 0) {
-      const width = first ? WRAP_COL : WRAP_COL - this.wrapIndent;
-      if (rest.length <= width) {
-        out.push(first ? rest : indent + rest);
-        break;
-      }
-      let cut = rest.lastIndexOf(" ", width);
-      if (cut < width * 0.6) cut = width;
-      out.push((first ? "" : indent) + rest.slice(0, cut).trimEnd());
-      rest = rest.slice(cut).trimStart();
-      first = false;
-    }
-    return out.join("\n");
-  }
-};
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-// src/celebrate.ts
-var ART_DIR = path3.resolve(path3.dirname(fileURLToPath(import.meta.url)), "../art/goal");
-var MAX_FRAMES = 40;
-var MIN_DELAY_MS = 50;
-var MAX_DELAY_MS = 2e3;
-var MAX_TOTAL_MS = 15e3;
-var MAX_LINE_WIDTH = 110;
-var DEFAULT_DELAY_MS = 600;
-var COLOR_TOKENS = {
-  reset: "\x1B[0m",
-  bold: "\x1B[1m",
-  dim: "\x1B[2m",
-  red: "\x1B[31m",
-  green: "\x1B[32m",
-  yellow: "\x1B[33m",
-  cyan: "\x1B[36m",
-  white: "\x1B[37m"
-};
-var cachedArts = null;
-var inFlight = false;
-async function celebrateGoal(logger) {
-  if (inFlight) return;
-  inFlight = true;
-  try {
-    const arts = loadArts();
-    if (arts.length === 0) return;
-    const frames = arts[Math.floor(Math.random() * arts.length)];
-    for (const f of frames) {
-      logger.art(f.text);
-      await sleep(f.delayMs);
-    }
-  } catch {
-  } finally {
-    inFlight = false;
-  }
-}
-function loadArts() {
-  if (cachedArts) return cachedArts;
-  const arts = [];
-  try {
-    for (const file of fs3.readdirSync(ART_DIR).filter((f) => f.endsWith(".txt")).sort()) {
-      try {
-        const frames = parseArt(fs3.readFileSync(path3.join(ART_DIR, file), "utf8"));
-        if (frames.length > 0) arts.push(frames);
-      } catch {
-      }
-    }
-  } catch {
-  }
-  if (arts.length === 0) arts.push(parseArt(BUILTIN_ART));
-  cachedArts = arts;
-  return arts;
-}
-function parseArt(src) {
-  const frames = [];
-  for (const block of src.split(/^---\s*$/m)) {
-    if (frames.length >= MAX_FRAMES) break;
-    let delayMs = DEFAULT_DELAY_MS;
-    const artLines = [];
-    for (const line of block.replace(/^\n+|\n+$/g, "").split("\n")) {
-      const d = /^#delay\s+(\d+)\s*$/.exec(line);
-      if (d) delayMs = Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, Number(d[1])));
-      if (/^#delay\b/.test(line)) continue;
-      if (/^#(\s|$)/.test(line)) continue;
-      artLines.push(renderLine(line));
-    }
-    const text = artLines.join("\n");
-    if (text.trim().length === 0) continue;
-    frames.push({ text, delayMs });
-  }
-  const total = frames.reduce((s, f) => s + f.delayMs, 0);
-  if (total > MAX_TOTAL_MS) {
-    const scale = MAX_TOTAL_MS / total;
-    for (const f of frames) f.delayMs = Math.round(f.delayMs * scale);
-  }
-  return frames;
-}
-function renderLine(line) {
-  let colored = false;
-  let out = "";
-  let budget = MAX_LINE_WIDTH;
-  let last = 0;
-  const emit = (text) => {
-    const take = text.slice(0, Math.max(0, budget));
-    out += take;
-    budget -= take.length;
-  };
-  for (const m of line.matchAll(/\{(\w+)\}/g)) {
-    emit(line.slice(last, m.index));
-    const code = COLOR_TOKENS[m[1]];
-    if (code === void 0) {
-      emit(m[0]);
-    } else {
-      out += code;
-      colored = true;
-    }
-    last = m.index + m[0].length;
-  }
-  emit(line.slice(last));
-  return colored && !out.endsWith(COLOR_TOKENS.reset) ? out + COLOR_TOKENS.reset : out;
-}
-var BUILTIN_ART = `#delay 450
-{dim}        \u25CF{reset}
----
-#delay 380
-{dim}                \u25CF{reset}
----
-#delay 300
-{dim}                          \u25CF{reset}
----
-#delay 240
-{cyan}                                    \u25CF{reset}
----
-#delay 200
-{cyan}                                            \u25CF\u25B8{reset}
----
-#delay 600
-{bold}{yellow}                                               \u2297 \uACE8\uB9DD\uC774 \uCC22\uC5B4\uC9C4\uB2E4{reset}
----
-#delay 400
-{bold}{yellow}      \u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2557      \u2588\u2588\u2557{reset}
----
-#delay 400
-{bold}{yellow}     \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D \u2588\u2588\u2554\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557 \u2588\u2588\u2551      \u2588\u2588\u2551{reset}
----
-#delay 400
-{bold}{yellow}     \u2588\u2588\u2551  \u2588\u2588\u2588\u2557\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551 \u2588\u2588\u2551      \u2588\u2588\u2551{reset}
----
-#delay 400
-{bold}{yellow}     \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551 \u2588\u2588\u2551      \u255A\u2550\u255D{reset}
----
-#delay 400
-{bold}{yellow}     \u255A\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u255A\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2551  \u2588\u2588\u2551 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557{reset}
----
-#delay 400
-{bold}{yellow}      \u255A\u2550\u2550\u2550\u2550\u2550\u255D  \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u255D  \u255A\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u255D{reset}
----
-#delay 900
-{yellow}        \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726 \u2726{reset}
----
-#delay 700
-{bold}{yellow}     G  O  O  O  O  O  O  O  O  O  A  L  !{reset}
----
-#delay 700
-{yellow}           G O O O O O A L !{reset}
----
-#delay 750
-{dim}                 g o o a l \u2026{reset}
----
-#delay 900
-{dim}                     \uAD00\uC911\uC11D\uC774 \uBB34\uB108\uC9C4\uB2E4. \uC228\uC744 \uACE0\uB974\uACE0, \uC911\uACC4\uB85C \uBCF5\uADC0.{reset}
----
-#delay 250
-{dim}\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500{reset}
-`;
 
 // src/espn.ts
 var BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer";
@@ -490,8 +207,127 @@ function toInt(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// src/logger.ts
+import fs2 from "node:fs";
+import path2 from "node:path";
+var WRAP_COL = 100;
+function matchLogPath(logDir, matchId) {
+  return path2.join(logDir, `match-${matchId}.log`);
+}
+function matchDonePath(logDir, matchId) {
+  return path2.join(logDir, `match-${matchId}.done`);
+}
+function writerPidPath(logDir, matchId) {
+  return path2.join(logDir, `match-${matchId}.writer.pid`);
+}
+var MatchLogger = class {
+  logPath;
+  rawPath;
+  donePath;
+  pidPath;
+  wrapIndent;
+  constructor(logDir, matchId, wrapIndent = 8) {
+    fs2.mkdirSync(logDir, { recursive: true });
+    this.logPath = matchLogPath(logDir, matchId);
+    this.rawPath = path2.join(logDir, `match-${matchId}.raw.jsonl`);
+    this.donePath = matchDonePath(logDir, matchId);
+    this.pidPath = writerPidPath(logDir, matchId);
+    this.wrapIndent = Number.isFinite(wrapIndent) ? Math.min(Math.max(0, Math.trunc(wrapIndent)), WRAP_COL - 40) : 8;
+  }
+  /** 위장 로그 한 줄. 길면 wrapIndent 들여쓰기로 줄바꿈 — README 예시의 2행 포맷 */
+  line(text) {
+    try {
+      fs2.appendFileSync(this.logPath, this.wrap(text) + "\n");
+    } catch {
+    }
+  }
+  /**
+   * tier-2 스트리밍: 여러 줄을 호흡 끊어 한 줄씩 flush.
+   * 줄 사이 지연은 캐스터의 호흡 — 다음 폴링 주기를 침범하지 않는 범위로 clamp.
+   */
+  async stream(lines, gapMs) {
+    for (let i = 0; i < lines.length; i++) {
+      if (i > 0) await sleep(gapMs);
+      this.line(lines[i]);
+    }
+  }
+  /**
+   * 위장 로그를 오염시키지 않는 사이드카. 스키마 변경·장애 시 raw JSON은 여기 쌓인다.
+   * (위장 원칙: 메인 로그에 이벤트가 아닌 것을 흘리지 않는다)
+   */
+  raw(kind, payload) {
+    const entry = { ts: (/* @__PURE__ */ new Date()).toISOString(), kind, payload };
+    try {
+      fs2.appendFileSync(this.rawPath, JSON.stringify(entry) + "\n");
+    } catch {
+    }
+  }
+  /**
+   * 중계 종료 마커. 반드시 최종 보고의 마지막 라인 append가 끝난 뒤에 불러야 한다 —
+   * follow는 "done 존재 + EOF 도달"을 동시에 봐야 종료로 판정하지만, done이 보고
+   * 중간에 먼저 생기면 잔여 라인을 버리고 턴을 끝내는 race가 된다.
+   */
+  markDone() {
+    try {
+      fs2.writeFileSync(this.donePath, (/* @__PURE__ */ new Date()).toISOString());
+    } catch {
+    }
+  }
+  /** 이전 경기(또는 이전 재생)의 stale done 제거 — writer 기동 직후 호출 */
+  clearDone() {
+    try {
+      fs2.unlinkSync(this.donePath);
+    } catch {
+    }
+  }
+  markWriter() {
+    try {
+      fs2.writeFileSync(this.pidPath, String(process.pid));
+    } catch {
+    }
+  }
+  clearWriter() {
+    try {
+      fs2.unlinkSync(this.pidPath);
+    } catch {
+    }
+  }
+  wrap(text) {
+    if (text.length <= WRAP_COL) return text;
+    if (WRAP_COL - this.wrapIndent <= 0) return text;
+    const indent = " ".repeat(this.wrapIndent);
+    const out = [];
+    let rest = text;
+    let first = true;
+    while (rest.length > 0) {
+      const width = first ? WRAP_COL : WRAP_COL - this.wrapIndent;
+      if (rest.length <= width) {
+        out.push(first ? rest : indent + rest);
+        break;
+      }
+      let cut = rest.lastIndexOf(" ", width);
+      if (cut < width * 0.6) cut = width;
+      out.push((first ? "" : indent) + rest.slice(0, cut).trimEnd());
+      rest = rest.slice(cut).trimStart();
+      first = false;
+    }
+    return out.join("\n");
+  }
+};
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 // src/narrate.ts
 import { execFile } from "node:child_process";
+var STYLE_GUIDE = [
+  "\uB2F9\uC2E0\uC740 \uCD95\uAD6C \uACBD\uAE30\uB97C \uB85C\uADF8(logger)\uCC98\uB7FC \uC911\uACC4\uD55C\uB2E4. \uAC01 \uC774\uBCA4\uD2B8\uB97C \uD55C \uC904\uC9DC\uB9AC \uD55C\uAD6D\uC5B4 \uC911\uACC4 \uBA58\uD2B8\uB85C \uBC14\uAFD4\uB77C.",
+  "- severity\uAC00 \uBD84\uC704\uAE30\uB97C \uC815\uD55C\uB2E4: log=\uB2F4\uB2F4\uD55C \uD750\uB984, warn=\uC704\uD5D8 \uC870\uC9D0(\uC138\uD2B8\uD53C\uC2A4\xB7\uC704\uD5D8\uC9C0\uC5ED \uC804\uAC1C), error=\uBC15\uC2A4 \uC548 \uACB0\uC815\uC801 \uC704\uAE30.",
+  '- \uC704\uD5D8 \uC0C1\uD669\uC740 \uC5B4\uB290 \uD300 \uACE8\uBB38/\uBC15\uC2A4 \uCABD\uC778\uC9C0 \uC9DA\uC5B4\uB77C. \uC608) "\uC2A4\uCF54\uD2C0\uB79C\uB4DC\uAC00 \uC624\uB978\uCABD\uC5D0\uC11C \uCF54\uB108\uD0A5\uC744 \uC5BB\uC2B5\uB2C8\uB2E4", "\uD574\uC774\uD2F0 \uD398\uB110\uD2F0 \uBC15\uC2A4 \uC548\uC5D0\uC11C \uC704\uD5D8\uD55C \uC0C1\uD669\uC774 \uC624\uAC11\uB2C8\uB2E4".',
+  "- \uC2A4\uCF54\uC5B4\xB7\uC2DC\uAC04\xB7\uC120\uC218\uBA85\uC740 \uC785\uB825\uC5D0 \uC788\uB294 \uAC83\uB9CC \uC4F0\uACE0 \uC808\uB300 \uBC14\uAFB8\uAC70\uB098 \uC9C0\uC5B4\uB0B4\uC9C0 \uC54A\uB294\uB2E4. \uC5B4\uC2DC\uC2A4\uD2B8\xB7\uBD80\uC0C1\xB7\uAD00\uC911 \uB4F1 \uC785\uB825\uC5D0 \uC5C6\uB294 \uC0AC\uC2E4 \uAE08\uC9C0.",
+  "- \uD0C0\uC784\uC2A4\uD0EC\uD504\uC640 [level] \uD0DC\uADF8\uB294 \uC2DC\uC2A4\uD15C\uC774 \uBD99\uC778\uB2E4. \uBA58\uD2B8 \uBCF8\uBB38\uB9CC \uCD9C\uB825\uD558\uB77C(\uD0DC\uADF8\xB7\uC811\uB450\uC0AC\xB7\uB530\uC634\uD45C \uC5C6\uC774).",
+  "- \uD300\uBA85\xB7\uC120\uC218\uBA85 \uB4F1 \uACE0\uC720\uBA85\uC0AC\uB9CC \uC6D0\uBB38 \uD45C\uAE30\uB97C \uD5C8\uC6A9\uD558\uACE0 \uB098\uBA38\uC9C0\uB294 \uD55C\uAD6D\uC5B4\uB85C \uC4F4\uB2E4."
+].join("\n");
 var Narrator = class {
   available = null;
   config;
@@ -511,22 +347,21 @@ var Narrator = class {
     return this.available;
   }
   /**
-   * 이벤트 묶음을 1회 호출로 각색. 실패·timeout·개수 불일치 시 null — 호출부가 템플릿 폴백.
-   * 반환: 이벤트 순서와 같은 desc 문자열 배열.
+   * 이벤트 묶음을 1회 호출로 각색. 실패·timeout·개수 불일치 시 null — 호출부가 한국어 폴백.
+   * 반환: 이벤트 순서와 같은 멘트 문자열 배열.
    */
-  async narrateBatch(events, skin) {
+  async narrateBatch(events, snap) {
     if (events.length === 0) return [];
     if (!await this.isAvailable()) return null;
-    const list = events.map((e, i) => `${i + 1}. [${e.minute}] (${e.category}) ${e.rawText}`).join("\n");
+    const list = events.map((e, i) => `${i + 1}. [${e.minute}] (${e.category}/${e.severity}) ${e.rawText}`).join("\n");
     const prompt = [
-      skin.guide,
+      STYLE_GUIDE,
       "",
-      "\uC544\uB798 \uCD95\uAD6C \uC774\uBCA4\uD2B8 \uAC01\uAC01\uC5D0 \uB300\uD574 \uC704 \uAC00\uC774\uB4DC\uB97C \uB530\uB974\uB294 \uBB18\uC0AC \uD14D\uC2A4\uD2B8\uB97C \uC0DD\uC131\uD558\uB77C.",
-      "- \uBB18\uC0AC\uB294 \uBC18\uB4DC\uC2DC \uD55C\uAD6D\uC5B4\uB85C \uC4F4\uB2E4. \uC120\uC218\uBA85\xB7\uD300\uBA85 \uB4F1 \uACE0\uC720\uBA85\uC0AC\uB9CC \uC6D0\uBB38 \uD45C\uAE30\uB97C \uD5C8\uC6A9\uD55C\uB2E4.",
-      "- \uBB18\uC0AC \uBCF8\uBB38\uB9CC. \uD0C0\uC784\uC2A4\uD0EC\uD504\xB7\uC0C1\uD0DC \uD0DC\uADF8\xB7\uC811\uB450\uC0AC\uB294 \uC2DC\uC2A4\uD15C\uC774 \uBD99\uC778\uB2E4.",
-      "- \uC2A4\uCF54\uC5B4\xB7\uC2DC\uAC04\xB7\uC120\uC218\uBA85\uC740 \uC785\uB825\uC5D0 \uC788\uB294 \uAC83\uB9CC \uC0AC\uC6A9\uD558\uACE0 \uC808\uB300 \uBC14\uAFB8\uC9C0 \uC54A\uB294\uB2E4.",
-      "- \uC785\uB825\uC5D0 \uC5C6\uB294 \uC0AC\uC2E4(\uC5B4\uC2DC\uC2A4\uD2B8, \uBD80\uC0C1, \uAD00\uC911 \uC218 \uB4F1)\uC744 \uC9C0\uC5B4\uB0B4\uC9C0 \uC54A\uB294\uB2E4.",
-      `- \uCD9C\uB825\uC740 JSON \uBB38\uC790\uC5F4 \uBC30\uC5F4 \uD558\uB098\uB9CC. \uAE38\uC774 ${events.length}, \uC774\uBCA4\uD2B8 \uC21C\uC11C \uADF8\uB300\uB85C.`,
+      `\uACBD\uAE30: ${snap.homeTeam}(${snap.homeAbbr}) vs ${snap.awayTeam}(${snap.awayAbbr})`,
+      `\uD604\uC7AC \uC2A4\uCF54\uC5B4: ${snap.homeAbbr} ${snap.homeScore} : ${snap.awayScore} ${snap.awayAbbr}`,
+      "",
+      "\uC544\uB798 \uC774\uBCA4\uD2B8 \uAC01\uAC01\uC744 \uC704 \uADDC\uCE59\uB300\uB85C \uD55C \uC904 \uBA58\uD2B8\uB85C \uBC14\uAFD4\uB77C.",
+      `\uCD9C\uB825\uC740 JSON \uBB38\uC790\uC5F4 \uBC30\uC5F4 \uD558\uB098\uB9CC. \uAE38\uC774 ${events.length}, \uC774\uBCA4\uD2B8 \uC21C\uC11C \uADF8\uB300\uB85C.`,
       "",
       "\uC774\uBCA4\uD2B8:",
       list
@@ -537,9 +372,9 @@ var Narrator = class {
     if (!parsed || parsed.length !== events.length) return null;
     return parsed.map((s) => sanitizeDesc(s));
   }
-  /** tier-2 사후 보강용 단건 각색 */
-  async narrateOne(event, skin) {
-    const batch = await this.narrateBatch([event], skin);
+  /** 단건 각색 (사후 보강용) */
+  async narrateOne(event, snap) {
+    const batch = await this.narrateBatch([event], snap);
     return batch?.[0] ?? null;
   }
   run(prompt, timeoutMs) {
@@ -575,131 +410,150 @@ function sanitizeDesc(s) {
   return d;
 }
 
-// src/skin.ts
-import fs4 from "node:fs";
-import path4 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
-var SKINS_DIR = path4.resolve(path4.dirname(fileURLToPath2(import.meta.url)), "../skins");
-function parseSkin(md, fallbackName) {
-  const fm = /^---\n([\s\S]*?)\n---/.exec(md);
-  const meta = {};
-  if (fm) {
-    for (const line of fm[1].split("\n")) {
-      const m = /^(\w+):\s*(.*)$/.exec(line.trim());
-      if (m) meta[m[1]] = m[2];
-    }
-  }
-  let detect = [];
-  try {
-    detect = JSON.parse(meta.detect ?? "[]");
-  } catch {
-    detect = [];
-  }
-  const guideMatch = /#{1,6}\s*각색 가이드\s*\n([\s\S]*?)(?=\n#{1,6}\s|$)/.exec(md);
-  const guide = (guideMatch?.[1] ?? "").trim();
-  const templates = {};
-  for (const ini of md.matchAll(/```ini\n([\s\S]*?)```/g)) {
-    for (const line of ini[1].split("\n")) {
-      const m = /^([\w.]+)\s*=\s*(.*)$/.exec(line);
-      if (m) templates[m[1]] = m[2];
-    }
-  }
-  const name = meta.name ?? fallbackName;
-  if (Object.keys(templates).length === 0) {
-    process.stderr.write(`[e2e-monitor] \uC2A4\uD0A8 "${name}": \uB77C\uC778 \uD15C\uD50C\uB9BF(\`\`\`ini \uBE14\uB85D)\uC774 \uBE44\uC5B4 \uC788\uC74C \u2014 \uCD9C\uB825\uC774 \uC5C6\uC744 \uAC83
-`);
-  } else {
-    for (const key of ["kickoff.fact", "goal.fact", "generic.flavor"]) {
-      if (!templates[key]) process.stderr.write(`[e2e-monitor] \uC2A4\uD0A8 "${name}": \uAD8C\uC7A5 \uD0A4 ${key} \uB204\uB77D
-`);
-    }
-  }
-  if (!guide) {
-    process.stderr.write(`[e2e-monitor] \uC2A4\uD0A8 "${name}": "# \uAC01\uC0C9 \uAC00\uC774\uB4DC" \uC139\uC158\uC774 \uBE44\uC5B4 \uC788\uC74C \u2014 \uAC01\uC0C9 \uD1A4\uC774 \uBE60\uC9C4\uB2E4
-`);
-  }
-  const rawIndent = Number(meta.wrapIndent);
-  return {
-    name,
-    description: meta.description ?? "",
-    detect,
-    wrapIndent: Number.isFinite(rawIndent) ? Math.min(Math.max(0, Math.trunc(rawIndent)), 60) : 8,
-    guide,
-    templates
-  };
-}
-function listSkins() {
-  if (!fs4.existsSync(SKINS_DIR)) return [];
-  return fs4.readdirSync(SKINS_DIR).filter((f) => f.endsWith(".md") && f !== "README.md").map((f) => f.replace(/\.md$/, "")).sort();
-}
-function loadSkinByName(name) {
-  const file = path4.join(SKINS_DIR, `${name}.md`);
-  if (!fs4.existsSync(file)) return null;
-  return parseSkin(fs4.readFileSync(file, "utf8"), name);
-}
-function resolveSkin(config, cwd) {
-  if (config.skin) {
-    const s = loadSkinByName(config.skin);
-    if (s) return s;
-    process.stderr.write(`[e2e-monitor] \uC2A4\uD0A8 "${config.skin}" \uC5C6\uC74C \u2014 cwd \uCD94\uC815\uC73C\uB85C \uD3F4\uBC31
-`);
-  }
-  for (const name of listSkins()) {
-    const s = loadSkinByName(name);
-    if (!s || s.detect.length === 0) continue;
-    const hit = s.detect.some((pattern) => {
-      if (pattern.includes("*")) {
-        const re = new RegExp("^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
-        try {
-          return fs4.readdirSync(cwd).some((f) => re.test(f));
-        } catch {
-          return false;
-        }
-      }
-      return fs4.existsSync(path4.join(cwd, pattern));
-    });
-    if (hit) return s;
-  }
-  return loadSkinByName("ts-dev") ?? parseSkin("", "empty");
-}
-function fillTemplate(tpl2, vars) {
-  return tpl2.replace(/\{(\w+)\}/g, (_, key) => {
-    const v = vars[key];
-    return v === void 0 || v === null ? "" : String(v);
-  });
-}
-
 // src/render.ts
+var RESET = "\x1B[0m";
+var LEVELS = {
+  log: { label: "log", emoji: "", ansi: "" },
+  warn: { label: "warn", emoji: "\u{1F7E1}", ansi: "\x1B[33m" },
+  error: { label: "error", emoji: "\u{1F534}", ansi: "\x1B[31m" },
+  critical: { label: "CRITICAL", emoji: "\u{1F7E5}", ansi: "\x1B[1;31m" }
+};
+var CUE_ANSI = "\x1B[1;36m";
 function nowStamp() {
   const d = /* @__PURE__ */ new Date();
   const p = (n) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
-function buildVars(event, snap, desc) {
-  const scoring = event?.teamAbbr;
-  const conceding = scoring === snap.homeAbbr ? snap.awayAbbr : scoring === snap.awayAbbr ? snap.homeAbbr : "";
-  const scoringTeam = scoring === snap.homeAbbr ? snap.homeTeam : scoring === snap.awayAbbr ? snap.awayTeam : "";
-  const fromText = event?.category === "goal" ? parseScoreFromGoalText(event.rawText, snap) : null;
-  return {
-    time: nowStamp(),
-    matchId: snap.matchId,
-    venue: snap.venue || "unknown-venue",
-    homeTeam: snap.homeTeam,
-    awayTeam: snap.awayTeam,
-    homeAbbr: snap.homeAbbr,
-    awayAbbr: snap.awayAbbr,
-    homeScore: fromText?.home ?? snap.homeScore,
-    awayScore: fromText?.away ?? snap.awayScore,
-    minute: event?.minute ?? `${snap.minuteNum}'`,
-    minuteNum: event?.minuteNum ?? snap.minuteNum,
-    player: event?.player ?? "",
-    teamAbbr: event?.teamAbbr ?? "",
-    scoringAbbr: scoring ?? "",
-    concedingAbbr: conceding,
-    scoringTeam,
-    rawText: event?.rawText ?? "",
-    desc: desc ?? ""
-  };
+function formatLine(severity, text) {
+  const s = LEVELS[severity];
+  const emoji = s.emoji ? `${s.emoji} ` : "";
+  const tag = s.ansi ? `${s.ansi}[${s.label}]${RESET}` : `[${s.label}]`;
+  return `${nowStamp()} ${emoji}${tag} ${text}`;
+}
+function formatCue(text) {
+  return `${nowStamp()} ${CUE_ANSI}[BREAK]${RESET} ${text}`;
+}
+var AMBIENT_POOL = [
+  "\uC911\uC6D0\uC5D0\uC11C \uC591 \uD300\uC774 \uBCFC\uC744 \uC8FC\uACE0\uBC1B\uC2B5\uB2C8\uB2E4",
+  "\uD6C4\uBC29\uC5D0\uC11C \uCC9C\uCC9C\uD788 \uBE4C\uB4DC\uC5C5\uC744 \uAC00\uC838\uAC11\uB2C8\uB2E4",
+  "\uCE21\uBA74\uC744 \uD65C\uC6A9\uD55C \uC804\uAC1C\uB97C \uC2DC\uB3C4\uD569\uB2C8\uB2E4",
+  "\uC911\uC559 \uACBD\uD569 \u2014 \uC18C\uC720\uAD8C\uC774 \uC624\uAC11\uB2C8\uB2E4",
+  "\uD15C\uD3EC\uB97C \uB2A6\uCD94\uBA70 \uAE30\uD68C\uB97C \uC5FF\uBD05\uB2C8\uB2E4",
+  "\uBBF8\uB4DC\uD544\uB4DC \uC2F8\uC6C0\uC774 \uD33D\uD33D\uD569\uB2C8\uB2E4",
+  "\uB871\uBCFC\uB85C \uC804\uC120\uC744 \uB04C\uC5B4\uC62C\uB9BD\uB2C8\uB2E4",
+  "\uC810\uC720\uC728 \uC2F8\uC6C0\uC774 \uC774\uC5B4\uC9D1\uB2C8\uB2E4",
+  "\uC218\uBE44 \uB77C\uC778\uC744 \uC815\uBE44\uD558\uBA70 \uAC04\uACA9\uC744 \uC881\uD799\uB2C8\uB2E4",
+  "\uBCFC\uC774 \uC88C\uC6B0\uB85C \uBD84\uBC30\uB429\uB2C8\uB2E4",
+  "\uC804\uBC29 \uC555\uBC15 \uC218\uC704\uB97C \uB04C\uC5B4\uC62C\uB9BD\uB2C8\uB2E4",
+  "\uB290\uB9B0 \uD638\uD761\uC73C\uB85C \uACBD\uAE30\uB97C \uC6B4\uC601\uD569\uB2C8\uB2E4",
+  "\uC804\uBC29 \uC555\uBC15\uC5D0 \uD328\uC2A4\uAC00 \uB04A\uAE41\uB2C8\uB2E4",
+  "\uBC31\uD328\uC2A4\uB85C \uB2E4\uC2DC \uBE4C\uB4DC\uC5C5\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4",
+  "\uC911\uC6D0\uC5D0\uC11C \uC778\uD130\uC149\uD2B8\uB97C \uB178\uB9BD\uB2C8\uB2E4",
+  "\uC0AC\uC774\uB4DC\uB77C\uC778\uC744 \uB530\uB77C \uACF5\uC774 \uD750\uB985\uB2C8\uB2E4"
+];
+function renderAmbient() {
+  const text = AMBIENT_POOL[Math.floor(Math.random() * AMBIENT_POOL.length)];
+  return formatLine("log", text);
+}
+function teamName(abbr, snap) {
+  if (!abbr) return "";
+  if (abbr === snap.homeAbbr) return snap.homeTeam;
+  if (abbr === snap.awayAbbr) return snap.awayTeam;
+  return abbr;
+}
+function opponentName(abbr, snap) {
+  if (abbr === snap.homeAbbr) return snap.awayTeam;
+  if (abbr === snap.awayAbbr) return snap.homeTeam;
+  return "";
+}
+function renderEventLines(event, snap, desc) {
+  const cat = event.category;
+  const team = teamName(event.teamAbbr, snap);
+  const opp = opponentName(event.teamAbbr, snap);
+  switch (cat) {
+    case "kickoff": {
+      const venue = snap.venue ? ` @ ${snap.venue}` : "";
+      return [formatLine("log", `\uD0A5\uC624\uD504 \u2014 ${snap.homeTeam} vs ${snap.awayTeam}${venue}`)];
+    }
+    case "resume":
+      return [formatLine("log", "\uD6C4\uBC18\uC804 \uC2DC\uC791")];
+    case "fulltime":
+      return [formatLine("log", "\uACBD\uAE30 \uC885\uB8CC \u2014 \uD480\uD0C0\uC784 \uD718\uC2AC")];
+    case "halftime":
+      return [formatCue("\uC804\uBC18 \uC885\uB8CC \u2014 \uC7A0\uC2DC \uD6C4 \uD6C4\uBC18\uC804")];
+    case "break":
+      return [formatCue("\uC218\uBD84 \uD734\uC2DD \u2014 \uC7A0\uC2DC \uC228\uC744 \uACE0\uB985\uB2C8\uB2E4")];
+    case "goal": {
+      const score = parseScoreFromGoalText(event.rawText, snap) ?? { home: snap.homeScore, away: snap.awayScore };
+      const scorer = event.player || teamName(event.teamAbbr, snap);
+      const who = scorer ? `${scorer} \u2014 ` : "";
+      return [formatLine("critical", `\uACE8! ${who}${snap.homeAbbr} ${score.home} : ${score.away} ${snap.awayAbbr}`)];
+    }
+    default: {
+      const narration = (desc && desc.trim() ? sanitizeDesc(desc) : "") || fallbackKo(event, team, opp);
+      return narration ? [formatLine(event.severity, narration)] : [];
+    }
+  }
+}
+function fallbackKo(event, team, opp) {
+  const t = team || "\uACF5\uACA9 \uD300";
+  switch (event.category) {
+    case "penalty":
+      return `\uD398\uB110\uD2F0\uD0A5 \uC0C1\uD669! ${t} \uD0A4\uCEE4\uAC00 \uC900\uBE44\uD569\uB2C8\uB2E4`;
+    case "var":
+      return "VAR \uD310\uB3C5\uC774 \uC9C4\uD589\uB429\uB2C8\uB2E4";
+    case "red":
+      return `${t} \uB808\uB4DC\uCE74\uB4DC \u2014 \uC218\uC801 \uBCC0\uD654\uAC00 \uC0DD\uAE41\uB2C8\uB2E4`;
+    case "yellow":
+      return `${t} \uC610\uB85C\uCE74\uB4DC`;
+    case "sub":
+      return `${t} \uC120\uC218 \uAD50\uCCB4`;
+    case "chance":
+      return opp ? `${t}\uC758 \uC29B! ${opp} \uACE8\uBB38\uC744 \uC704\uD611\uD569\uB2C8\uB2E4` : `\uC29B \u2014 \uACE8\uBB38\uC744 \uC704\uD611\uD569\uB2C8\uB2E4`;
+    case "setpiece":
+      return `${t} \uC138\uD2B8\uD53C\uC2A4 \uAE30\uD68C`;
+    default:
+      return KO_DESC_BY_TYPE[event.typeId ?? ""] ?? "\uACBD\uAE30\uAC00 \uC774\uC5B4\uC9D1\uB2C8\uB2E4";
+  }
+}
+var KO_DESC_BY_TYPE = {
+  "66": "\uD30C\uC6B8 \u2014 \uD750\uB984\uC774 \uC7A0\uC2DC \uB04A\uAE41\uB2C8\uB2E4",
+  "68": "\uC624\uD504\uC0AC\uC774\uB4DC \u2014 \uACF5\uACA9\uC774 \uBA48\uCDA5\uB2C8\uB2E4",
+  "122": "\uD578\uB4DC\uBCFC \uC120\uC5B8",
+  "129": "\uACBD\uAE30\uAC00 \uC7A0\uC2DC \uBA48\uCDA5\uB2C8\uB2E4",
+  "130": "\uACBD\uAE30\uAC00 \uC7A0\uC2DC \uBA48\uCDA5\uB2C8\uB2E4"
+};
+function renderFinalReport(snap, highlights) {
+  const lines = [];
+  lines.push(formatLine("log", `\u2500\u2500 \uCD5C\uC885 \uBCF4\uACE0 \u2500\u2500 ${snap.homeTeam} ${snap.homeScore} : ${snap.awayScore} ${snap.awayTeam}`));
+  for (const h of highlights) {
+    const who = [h.minute, h.player || teamName(h.teamAbbr, snap) || "", labelOf(h)].filter(Boolean).join(" ");
+    lines.push(formatLine(h.severity, who));
+  }
+  lines.push(formatLine("log", "\uACBD\uAE30 \uC885\uB8CC. \uC218\uACE0\uD558\uC168\uC2B5\uB2C8\uB2E4."));
+  return lines;
+}
+function labelOf(e) {
+  switch (e.category) {
+    case "goal":
+      return "\uB4DD\uC810";
+    case "red":
+      return "\uD1F4\uC7A5";
+    case "penalty":
+      return "PK";
+    case "yellow":
+      return "\uACBD\uACE0";
+    case "var":
+      return "VAR";
+    case "sub":
+      return "\uAD50\uCCB4";
+    case "chance":
+      return "\uAE30\uD68C";
+    case "setpiece":
+      return "\uC138\uD2B8\uD53C\uC2A4";
+    default:
+      return "\uAE30\uB85D";
+  }
 }
 function parseScoreFromGoalText(text, snap) {
   const m = /(?:Goal!|Own Goal[^.]*\.)\s+(.+?)\s+(\d+)[,:]\s+(.+?)\s+(\d+)\./.exec(text);
@@ -727,89 +581,10 @@ function matchesTeam(name, displayName, abbr) {
   for (const t of a) if (b.has(t)) return true;
   return false;
 }
-function tpl(skin, key, fallbackKey) {
-  return skin.templates[key] ?? (fallbackKey ? skin.templates[fallbackKey] : void 0) ?? null;
-}
-var KO_DESC_BY_TYPE = {
-  "66": "\uD30C\uC6B8 \uD718\uC2AC\uC774 \uC6B8\uB9B0\uB2E4, \uD750\uB984\uC774 \uC7A0\uC2DC \uB04A\uAE34\uB2E4",
-  "68": "\uBD80\uC2EC \uAE43\uBC1C\uC774 \uC62C\uB77C\uAC04\uB2E4 \u2014 \uC624\uD504\uC0AC\uC774\uB4DC",
-  "122": "\uD578\uB4DC\uBCFC \uC120\uC5B8",
-  "129": "\uACBD\uAE30\uAC00 \uC7A0\uC2DC \uBA48\uCD98\uB2E4",
-  "130": "\uACBD\uAE30\uAC00 \uC7A0\uC2DC \uBA48\uCD98\uB2E4"
-};
-function renderEvent(event, snap, skin, desc) {
-  const cat = event.category;
-  const vars0 = buildVars(event, snap);
-  let finalDesc = desc && desc.trim() ? sanitizeDesc(desc) : "";
-  if (!finalDesc) {
-    const fallbackTpl = tpl(skin, `${cat}.desc`, "generic.desc");
-    if (fallbackTpl) finalDesc = sanitizeDesc(fillTemplate(fallbackTpl, vars0).trim());
-  }
-  if (!finalDesc) finalDesc = KO_DESC_BY_TYPE[event.typeId ?? ""] ?? "";
-  const vars = buildVars(event, snap, finalDesc);
-  const lines = [];
-  const factOnly = cat === "kickoff" || cat === "halftime" || cat === "fulltime" || cat === "resume";
-  if (!factOnly) {
-    const flavorKey = cat === "goal" && !event.teamAbbr ? "generic.flavor" : `${cat}.flavor`;
-    const flavor = tpl(skin, flavorKey, "generic.flavor");
-    if (flavor && finalDesc) lines.push(fillTemplate(flavor, vars));
-  }
-  const fact = tpl(skin, `${cat}.fact`);
-  if (fact) lines.push(fillTemplate(fact, vars));
-  if (factOnly && lines.length === 0) {
-    const generic = tpl(skin, "generic.flavor");
-    if (generic) lines.push(fillTemplate(generic, vars));
-  }
-  return lines;
-}
-function renderReplay(event, snap, skin, desc) {
-  const replay = tpl(skin, "replay.flavor");
-  if (!replay) return null;
-  return fillTemplate(replay, buildVars(event, snap, desc));
-}
-function renderFinalReport(snap, highlights, skin) {
-  const lines = [];
-  const vars = buildVars(null, snap);
-  const header = tpl(skin, "report.header");
-  const lineTpl = tpl(skin, "report.line");
-  const footer = tpl(skin, "report.footer");
-  if (header) lines.push(fillTemplate(header, vars));
-  if (lineTpl) {
-    lines.push(fillTemplate(lineTpl, { ...vars, item: `FT ${snap.homeAbbr} ${snap.homeScore} : ${snap.awayScore} ${snap.awayAbbr}` }));
-    for (const h of highlights) {
-      const who = [h.minute, h.player || h.teamAbbr || "", labelOf(h)].filter(Boolean).join(" ");
-      lines.push(fillTemplate(lineTpl, { ...vars, item: who }));
-    }
-  }
-  if (footer) lines.push(fillTemplate(footer, vars));
-  return lines;
-}
-function labelOf(e) {
-  switch (e.category) {
-    case "goal":
-      return "\uB4DD\uC810";
-    case "red":
-      return "\uD1F4\uC7A5";
-    case "penalty":
-      return "PK";
-    case "yellow":
-      return "\uACBD\uACE0";
-    case "var":
-      return "VAR";
-    case "sub":
-      return "\uAD50\uCCB4";
-    case "chance":
-      return "\uAE30\uD68C";
-    case "setpiece":
-      return "\uC138\uD2B8\uD53C\uC2A4";
-    default:
-      return "\uAE30\uB85D";
-  }
-}
 
 // src/state.ts
-import fs5 from "node:fs";
-import path5 from "node:path";
+import fs3 from "node:fs";
+import path3 from "node:path";
 var MatchStateStore = class {
   seen = /* @__PURE__ */ new Set();
   statePath;
@@ -825,8 +600,8 @@ var MatchStateStore = class {
   /** 최종 보고용 골/퇴장 — 재시작에도 살아남도록 영속화 */
   highlights = [];
   constructor(logDir, matchId) {
-    fs5.mkdirSync(logDir, { recursive: true });
-    this.statePath = path5.join(logDir, `state-${matchId}.json`);
+    fs3.mkdirSync(logDir, { recursive: true });
+    this.statePath = path3.join(logDir, `state-${matchId}.json`);
     this.load();
   }
   /**
@@ -888,7 +663,7 @@ var MatchStateStore = class {
   }
   load() {
     try {
-      const p = JSON.parse(fs5.readFileSync(this.statePath, "utf8"));
+      const p = JSON.parse(fs3.readFileSync(this.statePath, "utf8"));
       this.seen = new Set(p.seenIds);
       this.lastState = p.lastState;
       this.lastHomeScore = p.lastHomeScore;
@@ -918,15 +693,15 @@ var MatchStateStore = class {
       highlights: this.highlights
     };
     try {
-      fs5.writeFileSync(this.statePath + ".tmp", JSON.stringify(p));
-      fs5.renameSync(this.statePath + ".tmp", this.statePath);
+      fs3.writeFileSync(this.statePath + ".tmp", JSON.stringify(p));
+      fs3.renameSync(this.statePath + ".tmp", this.statePath);
     } catch {
     }
   }
   /** 경기 종료 후 상태 파일 정리 */
   cleanup() {
     try {
-      fs5.unlinkSync(this.statePath);
+      fs3.unlinkSync(this.statePath);
     } catch {
     }
   }
@@ -937,11 +712,11 @@ function seqOf(id) {
   return Number.isFinite(n) ? n : null;
 }
 function acquireLock(logDir, matchId) {
-  fs5.mkdirSync(logDir, { recursive: true });
-  const lockPath = path5.join(logDir, `daemon-${matchId}.lock`);
+  fs3.mkdirSync(logDir, { recursive: true });
+  const lockPath = path3.join(logDir, `daemon-${matchId}.lock`);
   const tryWrite = () => {
     try {
-      fs5.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+      fs3.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
       return true;
     } catch {
       return false;
@@ -950,12 +725,12 @@ function acquireLock(logDir, matchId) {
   if (!tryWrite()) {
     let owner = NaN;
     try {
-      owner = Number(fs5.readFileSync(lockPath, "utf8"));
+      owner = Number(fs3.readFileSync(lockPath, "utf8"));
     } catch {
     }
     if (Number.isFinite(owner) && owner > 0 && isAlive(owner)) return { ok: false, pid: owner };
     try {
-      fs5.unlinkSync(lockPath);
+      fs3.unlinkSync(lockPath);
     } catch {
     }
     if (!tryWrite()) return { ok: false, pid: -1 };
@@ -964,7 +739,7 @@ function acquireLock(logDir, matchId) {
     ok: true,
     release: () => {
       try {
-        fs5.unlinkSync(lockPath);
+        fs3.unlinkSync(lockPath);
       } catch {
       }
     }
@@ -982,53 +757,33 @@ function isAlive(pid) {
 // src/tier.ts
 var NOISE_TYPE_IDS = /* @__PURE__ */ new Set([
   "118",
-  // Pass
   "177",
-  // Ball touch
   "176",
-  // Out
   "63",
-  // Clear
   "178",
-  // Take On
   "181",
-  // Aerial
   "148",
-  // Tackle
   "182",
-  // Attempted tackle
   "65",
-  // Cross
   "196",
-  // Dispossessed
   "179",
-  // Interception
   "141",
-  // Assists Shot
   "110",
-  // Goal Kick
   "162",
-  // Blocked Pass
   "77",
-  // Save (템플릿 텍스트 — 유의미한 선방은 106 Shot On Target 텍스트에 실림)
   "185",
-  // Drop of Ball
   "180",
-  // Claim
   "78",
-  // Assist
   "202",
-  // Keeper Sweeper
   "195",
-  // Punch
   "200",
-  // Shield ball opp
   "96",
-  // Free Kick (실행 노이즈 — 선언은 66 Foul 텍스트가 커버)
   "124"
-  // Throw In
 ]);
 var CHANCE_TYPE_IDS = /* @__PURE__ */ new Set(["106", "117", "135", "136"]);
+var SEVERITY_RANK = { log: 0, warn: 1, error: 2, critical: 3 };
+var ERROR_KEYWORDS = /\b(in the box|inside the box|penalty area|penalty box|close range|point-?blank|one-?on-?one|1v1|clear chance|big chance|rebound|tap-?in|breakaway|through on goal|denied by the|brilliant save|great save|forces? the goalkeeper)\b/i;
+var WARN_KEYWORDS = /\b(corner|free kick|free-kick|cross(?:es|ed)?|whipped|dangerous|into the box|through ball|threat|counter-?attack|set-?piece|long throw|swung in|delivery)\b/i;
 function ruleFor(item) {
   const t = item.typeText;
   const text = item.text;
@@ -1038,14 +793,15 @@ function ruleFor(item) {
   if (item.typeId === "83" || /^Match ends/i.test(text) || /^Second Half ends/i.test(text)) {
     return { category: "fulltime", tier: 2 };
   }
+  if (/cooling break|water break|drinks break|hydration break/i.test(t) || /cooling break|water break|drinks break|hydration break/i.test(text)) {
+    return { category: "break", tier: 1 };
+  }
   if (NOISE_TYPE_IDS.has(item.typeId)) return { category: "generic", tier: 0 };
   if (/^Goal kick/i.test(t)) return { category: "generic", tier: 0 };
   if (/^Goal\b/i.test(t) || /^Own Goal/i.test(t) || /^Goal!/i.test(text) || item.scoringPlay) {
     return { category: "goal", tier: 2 };
   }
-  if (/penalty/i.test(t) || /penalty/i.test(text)) {
-    return { category: "penalty", tier: 2 };
-  }
+  if (/penalty/i.test(t) || /penalty/i.test(text)) return { category: "penalty", tier: 2 };
   if (/^VAR/i.test(t) || /^VAR/i.test(text)) return { category: "var", tier: 2 };
   if (item.typeId === "93" || /red card/i.test(text)) return { category: "red", tier: 2 };
   if (item.typeId === "94" || /yellow card/i.test(text)) return { category: "yellow", tier: 1 };
@@ -1057,6 +813,32 @@ function ruleFor(item) {
   if (/\) [A-Za-z ]+ at \d+'$/.test(text)) return { category: "generic", tier: 0 };
   return { category: "generic", tier: 1 };
 }
+function baseSeverity(category) {
+  switch (category) {
+    case "goal":
+      return "critical";
+    case "penalty":
+    case "chance":
+      return "error";
+    case "var":
+    case "red":
+    case "setpiece":
+      return "warn";
+    default:
+      return "log";
+  }
+}
+function severityFor(category, text, typeText) {
+  let sev = baseSeverity(category);
+  const blob = `${text} ${typeText}`;
+  if (category === "var" && /goal|penalty/i.test(blob)) sev = max(sev, "error");
+  if (ERROR_KEYWORDS.test(blob)) sev = max(sev, "error");
+  else if (WARN_KEYWORDS.test(blob)) sev = max(sev, "warn");
+  return sev;
+}
+function max(a, b) {
+  return SEVERITY_RANK[a] >= SEVERITY_RANK[b] ? a : b;
+}
 function classify(item, config) {
   const base = ruleFor(item);
   let tier = base.tier;
@@ -1065,6 +847,7 @@ function classify(item, config) {
     id: item.id,
     category: base.category,
     tier,
+    severity: severityFor(base.category, item.text, item.typeText),
     minuteNum: item.minuteNum,
     minute: item.minute || `${item.minuteNum}'`,
     rawText: item.text,
@@ -1074,51 +857,41 @@ function classify(item, config) {
     teamAbbr: item.teamAbbr
   };
 }
+function isHot(event) {
+  return event.tier === 2 && SEVERITY_RANK[event.severity] >= SEVERITY_RANK.error;
+}
 function isEndgameClose(snap, config) {
   return snap.state === "in" && snap.minuteNum >= config.tier2.lateGameMinute && Math.abs(snap.homeScore - snap.awayScore) <= config.tier2.closeScoreDiff;
 }
 
 // src/daemon.ts
-var REPLAY_CATEGORIES = /* @__PURE__ */ new Set(["goal", "penalty", "var", "red"]);
-var MAX_INFLIGHT_REPLAYS = 2;
+var HOT_CATEGORIES = /* @__PURE__ */ new Set(["goal", "penalty", "red", "var"]);
 var STREAM_GAP_MS = 600;
 var IDLE_INTERVAL_SEC = 30;
 var CATCHUP_THRESHOLD = 12;
 async function runDaemon(eventId, opts = {}) {
   const config = loadConfig(opts.configPath);
   if (opts.league) config.league = opts.league;
-  const skin = resolveSkin(config, process.cwd());
   const lock = acquireLock(config.logDir, eventId);
   if (!lock.ok) {
     process.stderr.write(`[e2e-monitor] match ${eventId}\uC740 \uC774\uBBF8 \uB370\uBAAC(pid ${lock.pid})\uC774 \uCD94\uC801 \uC911
 `);
     return;
   }
-  const logger = new MatchLogger(config.logDir, eventId, skin.wrapIndent);
+  const logger = new MatchLogger(config.logDir, eventId);
   const state = new MatchStateStore(config.logDir, eventId);
   const narrator = new Narrator(config);
   logger.clearDone();
   logger.markWriter();
   process.stdout.write(
-    `[e2e-monitor] \uB370\uBAAC \uAC00\uB3D9 \u2014 match ${eventId}, skin ${skin.name}
+    `[e2e-monitor] \uB370\uBAAC \uAC00\uB3D9 \u2014 match ${eventId}
 [e2e-monitor] \uD130\uBBF8\uB110 \uC2DC\uCCAD: tail -f ${logger.logPath}
 `
   );
-  const pendingReplays = /* @__PURE__ */ new Set();
-  let celebration = Promise.resolve();
   let fastUntil = 0;
   let errStreak = 0;
   let primed = state.kickoffAnnounced;
-  const enqueueReplay = (event, snap) => {
-    if (pendingReplays.size >= MAX_INFLIGHT_REPLAYS) return;
-    const p = narrator.narrateOne(event, skin).then((desc) => {
-      if (!desc) return;
-      const line = renderReplay(event, snap, skin, desc);
-      if (line) logger.line(line);
-    }).catch(() => {
-    }).finally(() => pendingReplays.delete(p));
-    pendingReplays.add(p);
-  };
+  let lastOutputAt = Date.now();
   try {
     for (; ; ) {
       const t0 = Date.now();
@@ -1132,13 +905,19 @@ async function runDaemon(eventId, opts = {}) {
       }
       errStreak = 0;
       const snap = res.data;
-      let finished = false;
+      let result = { finished: false, emitted: false };
       try {
-        finished = await processTick(snap);
+        result = await processTick(snap);
       } catch (e) {
         logger.raw("tick-error", { error: e instanceof Error ? e.stack ?? e.message : String(e) });
       }
-      if (finished || opts.once) return;
+      if (result.emitted) lastOutputAt = Date.now();
+      if (result.finished || opts.once) return;
+      const inPlay = snap.state === "in" && snap.statusDetail !== "HT";
+      if (inPlay && !result.emitted && Date.now() - lastOutputAt >= config.ambientIntervalSec * 1e3) {
+        logger.line(renderAmbient());
+        lastOutputAt = Date.now();
+      }
       const idle = snap.state === "pre" || snap.statusDetail === "HT";
       const intervalSec = idle ? IDLE_INTERVAL_SEC : isEndgameClose(snap, config) || Date.now() < fastUntil ? config.tier2PollIntervalSec : config.pollIntervalSec;
       await sleepRemainder(t0, intervalSec);
@@ -1152,14 +931,14 @@ async function runDaemon(eventId, opts = {}) {
     let events = fresh.map((i) => classify(i, config)).filter((e) => e.tier > 0);
     if (snap.state === "pre") {
       state.update(snap.state, snap.homeScore, snap.awayScore);
-      return false;
+      return { finished: false, emitted: false };
     }
     if (!primed && events.length > CATCHUP_THRESHOLD) {
-      await catchUp(events, snap, skin, logger, state);
+      await catchUp(events, snap, logger, state);
       primed = true;
       state.markAnnounced(snap.homeScore, snap.awayScore);
       state.update(snap.state, snap.homeScore, snap.awayScore);
-      return false;
+      return { finished: false, emitted: true };
     }
     primed = true;
     if (snap.state === "in" && !state.kickoffAnnounced && !events.some((e) => e.category === "kickoff")) {
@@ -1175,10 +954,10 @@ async function runDaemon(eventId, opts = {}) {
       }
     }
     const endgame = isEndgameClose(snap, config);
-    const tier2Events = events.filter((e) => e.tier === 2 || endgame && e.tier >= 1);
-    const tier1Events = events.filter((e) => !tier2Events.includes(e));
-    let goalScored = false;
-    for (const e of tier2Events) {
+    const immediate = events.filter((e) => e.tier === 2 || endgame && e.tier >= 1);
+    const batched = events.filter((e) => !immediate.includes(e));
+    let emitted = false;
+    for (const e of immediate) {
       if (e.category === "kickoff") {
         if (state.kickoffAnnounced) continue;
         state.markKickoff();
@@ -1192,66 +971,63 @@ async function runDaemon(eventId, opts = {}) {
         const s = parseScoreFromGoalText(e.rawText, snap);
         if (s && state.isAnnounced(s.home, s.away)) continue;
         state.markAnnounced(s?.home ?? snap.homeScore, s?.away ?? snap.awayScore);
-        goalScored = true;
       }
-      await logger.stream(renderEvent(e, snap, skin), STREAM_GAP_MS);
-      if (REPLAY_CATEGORIES.has(e.category)) {
-        if (e.category === "goal" || e.category === "red") state.addHighlight(e);
-        enqueueReplay(e, snap);
-        fastUntil = Date.now() + config.tier2.cooldownSec * 1e3;
-      }
+      await logger.stream(renderEventLines(e, snap), STREAM_GAP_MS);
+      emitted = true;
+      if (e.category === "goal" || e.category === "red") state.addHighlight(e);
+      if (isHot(e) || HOT_CATEGORIES.has(e.category)) fastUntil = Date.now() + config.tier2.cooldownSec * 1e3;
     }
-    if (tier1Events.length > 0) {
+    if (batched.length > 0) {
       const fastNow = endgame || Date.now() < fastUntil;
       let descs = null;
-      if (!fastNow) {
-        descs = await narrator.narrateBatch(tier1Events, skin).catch(() => null);
+      if (!fastNow) descs = await narrator.narrateBatch(batched, snap).catch(() => null);
+      for (let i = 0; i < batched.length; i++) {
+        for (const line of renderEventLines(batched[i], snap, descs?.[i])) {
+          logger.line(line);
+          emitted = true;
+        }
       }
-      for (let i = 0; i < tier1Events.length; i++) {
-        for (const line of renderEvent(tier1Events[i], snap, skin, descs?.[i])) logger.line(line);
-      }
-    }
-    if (goalScored && config.goalAnimation) {
-      const prev = celebration;
-      const next = celebrateGoal(logger).catch(() => {
-      });
-      celebration = Promise.allSettled([prev, next]).then(() => {
-      });
     }
     state.update(snap.state, snap.homeScore, snap.awayScore);
     if (snap.state === "post") {
-      await Promise.race([Promise.allSettled([...pendingReplays, celebration]), sleep(15e3)]);
-      await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20), skin), 300);
+      await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20)), 300);
       logger.markDone();
       state.cleanup();
       process.stdout.write(`[e2e-monitor] match ${eventId} \uC885\uB8CC \u2014 \uB370\uBAAC \uC790\uC9C4 \uC885\uB8CC
 `);
-      return true;
+      return { finished: true, emitted: true };
     }
-    return false;
+    return { finished: false, emitted };
   }
 }
-async function catchUp(events, snap, skin, logger, state) {
+async function catchUp(events, snap, logger, state) {
   const kickoff = events.find((e) => e.category === "kickoff") ?? syntheticEvent("kickoff", snap, "");
-  await logger.stream(renderEvent(kickoff, snap, skin), STREAM_GAP_MS);
+  await logger.stream(renderEventLines(kickoff, snap), STREAM_GAP_MS);
   state.markKickoff();
   for (const e of events) {
     if (e.category === "goal" || e.category === "red" || e.category === "penalty") {
-      await logger.stream(renderEvent(e, snap, skin), STREAM_GAP_MS);
+      await logger.stream(renderEventLines(e, snap), STREAM_GAP_MS);
       if (e.category !== "penalty") state.addHighlight(e);
     }
   }
   if (snap.statusDetail === "HT") {
     const ht = events.find((e) => e.category === "halftime") ?? syntheticEvent("halftime", snap, "");
-    await logger.stream(renderEvent(ht, snap, skin), STREAM_GAP_MS);
+    await logger.stream(renderEventLines(ht, snap), STREAM_GAP_MS);
   }
   if (events.some((e) => e.category === "halftime")) state.markHalftime();
 }
+var SYNTH_SEVERITY = {
+  goal: "critical",
+  var: "warn",
+  kickoff: "log",
+  halftime: "log"
+};
 function syntheticEvent(category, snap, teamAbbr) {
   return {
     id: `synthetic:${category}:${snap.minuteNum}:${snap.homeScore}-${snap.awayScore}`,
     category,
     tier: 2,
+    severity: SYNTH_SEVERITY[category] ?? "log",
     minuteNum: snap.minuteNum,
     minute: `${snap.minuteNum}'`,
     teamAbbr: teamAbbr || void 0,
@@ -1263,7 +1039,7 @@ async function sleepRemainder(t0, intervalSec) {
 }
 
 // src/follow.ts
-import fs6 from "node:fs";
+import fs4 from "node:fs";
 var POLL_MS = 300;
 var QUIET_MS = 2500;
 var MAX_COLLECT_MS = 2e4;
@@ -1280,12 +1056,12 @@ async function runFollow(eventId, opts = {}) {
   const deadline = Date.now() + waitSec * 1e3;
   const sizeOf = () => {
     try {
-      return fs6.statSync(logPath).size;
+      return fs4.statSync(logPath).size;
     } catch {
       return -1;
     }
   };
-  const doneExists = () => fs6.existsSync(donePath);
+  const doneExists = () => fs4.existsSync(donePath);
   if (cursor === 0 && doneExists()) {
     const size0 = sizeOf();
     const graceUntil = Date.now() + Math.min(STALE_DONE_GRACE_MS, waitSec * 1e3);
@@ -1343,16 +1119,16 @@ function readRange(logPath, from, to) {
   if (to <= from) return Buffer.alloc(0);
   let fd = null;
   try {
-    fd = fs6.openSync(logPath, "r");
+    fd = fs4.openSync(logPath, "r");
     const buf = Buffer.alloc(to - from);
-    const n = fs6.readSync(fd, buf, 0, buf.length, from);
+    const n = fs4.readSync(fd, buf, 0, buf.length, from);
     return buf.subarray(0, Math.max(0, n));
   } catch {
     return Buffer.alloc(0);
   } finally {
     if (fd !== null) {
       try {
-        fs6.closeSync(fd);
+        fs4.closeSync(fd);
       } catch {
       }
     }
@@ -1360,7 +1136,7 @@ function readRange(logPath, from, to) {
 }
 function writerAlive(pidPath) {
   try {
-    const pid = Number(fs6.readFileSync(pidPath, "utf8").trim());
+    const pid = Number(fs4.readFileSync(pidPath, "utf8").trim());
     if (!Number.isFinite(pid) || pid <= 0) return false;
     process.kill(pid, 0);
     return true;
@@ -1373,26 +1149,25 @@ function stripAnsi(s) {
 }
 
 // src/replay.ts
-import fs7 from "node:fs";
+import fs5 from "node:fs";
 var STREAM_GAP_MS2 = 600;
 var MIN_GAP_MS = 700;
 var MAX_GAP_MS = 25e3;
+var AMBIENT_CHUNK_MS = 3e3;
 async function runReplay(eventId, opts = {}) {
   const config = loadConfig(opts.configPath);
   if (opts.league) config.league = opts.league;
   const speed = Math.max(1, Number(opts.speed) || 15);
-  const skin = resolveSkin(config, process.cwd());
-  const logger = new MatchLogger(config.logDir, eventId, skin.wrapIndent);
-  const narrator = new Narrator(config);
+  const logger = new MatchLogger(config.logDir, eventId);
   logger.clearDone();
   logger.markWriter();
   try {
-    await runReplayBody(eventId, config, speed, skin, logger, narrator);
+    await runReplayBody(eventId, config, speed, logger);
   } finally {
     logger.clearWriter();
   }
 }
-async function runReplayBody(eventId, config, speed, skin, logger, narrator) {
+async function runReplayBody(eventId, config, speed, logger) {
   const res = await fetchSummary(config.league, eventId);
   if (!res.ok) {
     process.stderr.write(`[e2e-monitor] summary \uC2E4\uD328: ${res.error}
@@ -1410,7 +1185,7 @@ async function runReplayBody(eventId, config, speed, skin, logger, narrator) {
     return;
   }
   try {
-    fs7.writeFileSync(logger.logPath, "");
+    fs5.writeFileSync(logger.logPath, "");
   } catch {
   }
   const events = snap.items.map((i) => classify(i, config)).filter((e) => e.tier > 0);
@@ -1421,17 +1196,17 @@ async function runReplayBody(eventId, config, speed, skin, logger, narrator) {
   );
   const running = { ...snap, homeScore: 0, awayScore: 0 };
   const highlights = [];
-  const pendingReplays = [];
   let prevMinute = 0;
   const kickoff = {
     id: "replay:kickoff",
     category: "kickoff",
     tier: 2,
+    severity: "log",
     minuteNum: 0,
     minute: "0'",
     rawText: "kickoff"
   };
-  await logger.stream(renderEvent(kickoff, running, skin), STREAM_GAP_MS2);
+  await logger.stream(renderEventLines(kickoff, running), STREAM_GAP_MS2);
   let halftimeDone = false;
   let fulltimeDone = false;
   for (const e of events) {
@@ -1446,39 +1221,30 @@ async function runReplayBody(eventId, config, speed, skin, logger, narrator) {
       fulltimeDone = true;
     }
     const gap = Math.max(MIN_GAP_MS, Math.min(MAX_GAP_MS, (e.minuteNum - prevMinute) * (6e4 / speed)));
-    await sleep(gap);
+    await pacedGap(gap, logger);
     prevMinute = Math.max(prevMinute, e.minuteNum);
     if (e.category === "goal") {
       bumpScore(running, e);
       highlights.push(e);
     }
     if (e.category === "red") highlights.push(e);
-    if (e.tier === 2) {
-      await logger.stream(renderEvent(e, running, skin), STREAM_GAP_MS2);
-      if (e.category === "goal" && config.goalAnimation) {
-        await celebrateGoal(logger).catch(() => {
-        });
-      }
-      if ((e.category === "goal" || e.category === "red") && pendingReplays.length < 2) {
-        const snapAt = { ...running };
-        pendingReplays.push(
-          narrator.narrateOne(e, skin).then((desc) => {
-            if (!desc) return;
-            const line = renderReplay(e, snapAt, skin, desc);
-            if (line) logger.line(line);
-          }).catch(() => {
-          })
-        );
-      }
-    } else {
-      for (const line of renderEvent(e, running, skin)) logger.line(line);
-    }
+    await logger.stream(renderEventLines(e, running), STREAM_GAP_MS2);
   }
-  await Promise.race([Promise.allSettled(pendingReplays), sleep(15e3)]);
-  await logger.stream(renderFinalReport(snap, highlights.slice(0, 20), skin), 300);
+  await logger.stream(renderFinalReport(snap, highlights.slice(0, 20)), 300);
   logger.markDone();
   process.stdout.write(`[e2e-monitor] \uB9AC\uD50C\uB808\uC774 \uC885\uB8CC \u2014 ${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}
 `);
+}
+async function pacedGap(gapMs, logger) {
+  let remaining = gapMs;
+  let first = true;
+  while (remaining > 0) {
+    const chunk = Math.min(remaining, AMBIENT_CHUNK_MS);
+    await sleep(chunk);
+    remaining -= chunk;
+    if (!first && remaining > 0) logger.line(renderAmbient());
+    first = false;
+  }
 }
 function bumpScore(running, e) {
   const m = /Goal!\s+(.+?)\s+(\d+)[,:]\s+(.+?)\s+(\d+)\./.exec(e.rawText);

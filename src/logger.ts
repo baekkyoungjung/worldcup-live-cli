@@ -24,13 +24,13 @@ export class MatchLogger {
   private pidPath: string;
   private wrapIndent: number;
 
-  constructor(logDir: string, matchId: string, wrapIndent: number) {
+  constructor(logDir: string, matchId: string, wrapIndent = 8) {
     fs.mkdirSync(logDir, { recursive: true });
     this.logPath = matchLogPath(logDir, matchId);
     this.rawPath = path.join(logDir, `match-${matchId}.raw.jsonl`);
     this.donePath = matchDonePath(logDir, matchId);
     this.pidPath = writerPidPath(logDir, matchId);
-    // 음수면 repeat가 throw, WRAP_COL 이상이면 wrap이 무한 루프 — 스킨 입력은 신뢰하지 않는다
+    // 음수면 repeat가 throw, WRAP_COL 이상이면 wrap이 무한 루프 — 입력은 신뢰하지 않는다
     this.wrapIndent = Number.isFinite(wrapIndent) ? Math.min(Math.max(0, Math.trunc(wrapIndent)), WRAP_COL - 40) : 8;
   }
 
@@ -51,18 +51,6 @@ export class MatchLogger {
     for (let i = 0; i < lines.length; i++) {
       if (i > 0) await sleep(gapMs);
       this.line(lines[i]);
-    }
-  }
-
-  /**
-   * 미리 조판된 텍스트(골 애니메이션 프레임)의 raw append — wrap 없이 그대로.
-   * ANSI 색 코드가 길이 계산에 섞이면 wrap이 아트를 찢는다.
-   */
-  art(text: string): void {
-    try {
-      fs.appendFileSync(this.logPath, text + '\n');
-    } catch {
-      // 프레임 하나 유실은 연출 문제일 뿐 — 데몬은 계속 간다
     }
   }
 

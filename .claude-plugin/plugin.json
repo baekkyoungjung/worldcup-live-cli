@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "e2e-monitor",
   "displayName": "e2e-monitor",
-  "version": "1.0.0",
-  "description": "월드컵 경기를 직군 산출물로 위장한 머드 게임풍 텍스트 중계로 Claude Code 세션에 실시간으로 흘려보낸다. ESPN 비공식 API 폴링 → 위장 로그 → 세션 내 스트리밍.",
+  "version": "1.1.1",
+  "description": "월드컵 경기를 로거(log/warn/error/CRITICAL) 형식의 실시간 텍스트 중계로 Claude Code 세션에 흘려보낸다. ESPN 비공식 API 폴링 → severity 로그 + 10초 앰비언트 + 10분/하프타임 recap.",
   "author": {
     "name": "baekkyoungjung",
     "url": "https://github.com/baekkyoungjung"

@@ -8,9 +8,9 @@ export const CONFIG_DIR = path.join(os.homedir(), '.e2e-monitor');
 const DEFAULTS: Config = {
   league: 'fifa.world',
   logDir: CONFIG_DIR,
-  goalAnimation: true,
   pollIntervalSec: 10,
   tier2PollIntervalSec: 3,
+  ambientIntervalSec: 10,
   tier2: {
     typeIds: [],
     lateGameMinute: 80,
@@ -46,6 +46,8 @@ export function loadConfig(configPath?: string): Config {
     HARD_MIN_TIER2_POLL_SEC,
     Number(merged.tier2PollIntervalSec) || HARD_MIN_TIER2_POLL_SEC,
   );
+  // 앰비언트 간격: 3초 하한(고속 폴링 중에도 멘트가 도배되지 않게)
+  merged.ambientIntervalSec = Math.max(3, finiteOr(merged.ambientIntervalSec, DEFAULTS.ambientIntervalSec));
   // 나머지 사용자 입력도 모양을 보장한다 — 잘못된 config로 경기 중에 죽지 않는다
   merged.tier2.typeIds = Array.isArray(merged.tier2.typeIds) ? merged.tier2.typeIds.map(String) : [];
   merged.tier2.lateGameMinute = finiteOr(merged.tier2.lateGameMinute, DEFAULTS.tier2.lateGameMinute);
@@ -54,10 +56,8 @@ export function loadConfig(configPath?: string): Config {
   merged.narrator.timeoutSec = Math.max(5, finiteOr(merged.narrator.timeoutSec, DEFAULTS.narrator.timeoutSec));
   if (!['auto', 'claude', 'template'].includes(merged.narrator.mode)) merged.narrator.mode = 'auto';
   merged.narrator.model = typeof merged.narrator.model === 'string' ? merged.narrator.model : DEFAULTS.narrator.model;
-  merged.goalAnimation = merged.goalAnimation !== false; // 기본 on — false 명시로만 끈다
   merged.league = typeof merged.league === 'string' && merged.league ? merged.league : DEFAULTS.league;
   merged.logDir = expandHome(typeof merged.logDir === 'string' && merged.logDir ? merged.logDir : DEFAULTS.logDir);
-  merged.skin = typeof merged.skin === 'string' ? merged.skin : undefined;
   return merged;
 }
 

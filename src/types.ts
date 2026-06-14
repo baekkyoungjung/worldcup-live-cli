@@ -3,6 +3,7 @@ export type Category =
   | 'halftime'
   | 'resume'
   | 'fulltime'
+  | 'break' // 수분 휴식 / 쿨링 브레이크
   | 'goal'
   | 'penalty'
   | 'var'
@@ -13,13 +14,23 @@ export type Category =
   | 'setpiece'
   | 'generic';
 
-/** 0 = 출력 스킵(노이즈), 1 = 기본 흐름, 2 = 스트리밍 승격 */
+/** 0 = 출력 스킵(노이즈), 1 = 기본 흐름, 2 = 고속 폴링 승격(위험 상황) */
 export type Tier = 0 | 1 | 2;
+
+/**
+ * 중계 라인의 위험도. 로거 prefix와 색/이모지를 결정한다.
+ *  log      일반 흐름(중원 경합 등)
+ *  warn     세트피스·위험지역 전개 (노란색 / 🟡)
+ *  error    박스 안 위험·슛·PK (빨간색 / 🔴)
+ *  critical 골 (빨간색 / 🟥)
+ */
+export type Severity = 'log' | 'warn' | 'error' | 'critical';
 
 export interface MatchEvent {
   id: string;
   category: Category;
   tier: Tier;
+  severity: Severity;
   minuteNum: number;
   minute: string; // "67'"
   rawText: string;
@@ -51,7 +62,7 @@ export interface MatchSnapshot {
   keyEventsOnly: boolean;
 }
 
-/** ESPN 응답에서 최소한으로 정규화한 원본 항목. 분류(tier/category)는 tier.ts 담당 */
+/** ESPN 응답에서 최소한으로 정규화한 원본 항목. 분류(tier/severity/category)는 tier.ts 담당 */
 export interface RawItem {
   id: string;
   typeId: string;
@@ -65,36 +76,21 @@ export interface RawItem {
   scoringPlay?: boolean;
 }
 
-export interface SkinTemplates {
-  [key: string]: string; // "goal.flavor" → 템플릿 문자열
-}
-
-export interface Skin {
-  name: string;
-  description: string;
-  detect: string[];
-  wrapIndent: number;
-  /** claude -p 프롬프트에 주입되는 각색 가이드 원문 */
-  guide: string;
-  templates: SkinTemplates;
-}
-
 export interface Config {
-  skin?: string;
   league: string;
   logDir: string;
-  /** 골 순간 10초 위장 해제 애니메이션 (art/goal/*.txt). false면 기존 출력과 완전 동일 */
-  goalAnimation: boolean;
   pollIntervalSec: number; // 하한 10s — 코드에서 clamp
   tier2PollIntervalSec: number; // 하한 3s — 코드에서 clamp
+  /** 이벤트 없는 구간에서 앰비언트 멘트를 흘리는 최소 간격(초). 정적을 없앤다 */
+  ambientIntervalSec: number;
   tier2: {
-    /** tier-2로 승격할 ESPN type id 목록 (기본값은 tier.ts) */
+    /** 고속 폴링(tier-2)로 승격할 ESPN type id 목록 (기본값은 tier.ts) */
     typeIds: string[];
-    /** 이 분 이후 + 박빙이면 상황 전체를 tier-2로 */
+    /** 이 분 이후 + 박빙이면 상황 전체를 고속 폴링으로 */
     lateGameMinute: number;
     /** 박빙 판정 점수차 */
     closeScoreDiff: number;
-    /** tier-2 이벤트 후 고속 폴링을 유지할 시간(초) — 골 전후 시퀀스 */
+    /** 위험 이벤트 후 고속 폴링을 유지할 시간(초) */
     cooldownSec: number;
   };
   narrator: {

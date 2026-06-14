@@ -1,10 +1,9 @@
 {
-  "skin": "ts-dev",
   "league": "fifa.world",
-  "goalAnimation": true,
   "logDir": "~/.e2e-monitor",
   "pollIntervalSec": 10,
   "tier2PollIntervalSec": 3,
+  "ambientIntervalSec": 10,
   "tier2": {
     "typeIds": [],
     "lateGameMinute": 80,

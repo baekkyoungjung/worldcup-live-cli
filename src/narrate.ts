@@ -1,13 +1,22 @@
 import { execFile } from 'node:child_process';
-import type { Config, MatchEvent, Skin } from './types.js';
+import type { Config, MatchEvent, MatchSnapshot } from './types.js';
 
 /**
- * 각색 전략 (실측 근거 — README [내부] 메모 ②):
- * claude -p 1회 지연 중앙값 10.95s, 최단 6.8s — 3s 폴링 주기 초과 확정.
- * 따라서 동기 각색은 하지 않는다.
- * - tier-1: tick에 쌓인 이벤트를 배치 1회 호출로 각색 (기동 고정비 상각), timeout 시 템플릿
- * - tier-2: 템플릿 즉시 출력이 우선 — 각색은 비동기 replay 보강 라인으로만 합류
+ * 각색 전략 (실측 근거): claude -p 1회 지연 중앙값 ~11s, 최단 6.8s — 3s 고속 폴링 주기를
+ * 못 따라온다. 따라서 위험 상황(error/critical)은 템플릿으로 즉시 출력하고, 흐름 이벤트만
+ * 배치 1회 호출로 각색한다(기동 고정비 상각). 실패·timeout이면 호출부가 한국어 폴백을 쓴다.
+ * 스킨 시스템은 제거됐다 — 톤은 아래 고정 STYLE_GUIDE가 정한다.
  */
+
+const STYLE_GUIDE = [
+  '당신은 축구 경기를 로그(logger)처럼 중계한다. 각 이벤트를 한 줄짜리 한국어 중계 멘트로 바꿔라.',
+  '- severity가 분위기를 정한다: log=담담한 흐름, warn=위험 조짐(세트피스·위험지역 전개), error=박스 안 결정적 위기.',
+  '- 위험 상황은 어느 팀 골문/박스 쪽인지 짚어라. 예) "스코틀랜드가 오른쪽에서 코너킥을 얻습니다", "해이티 페널티 박스 안에서 위험한 상황이 오갑니다".',
+  '- 스코어·시간·선수명은 입력에 있는 것만 쓰고 절대 바꾸거나 지어내지 않는다. 어시스트·부상·관중 등 입력에 없는 사실 금지.',
+  '- 타임스탬프와 [level] 태그는 시스템이 붙인다. 멘트 본문만 출력하라(태그·접두사·따옴표 없이).',
+  '- 팀명·선수명 등 고유명사만 원문 표기를 허용하고 나머지는 한국어로 쓴다.',
+].join('\n');
+
 export class Narrator {
   private available: boolean | null = null;
   private config: Config;
@@ -20,8 +29,6 @@ export class Narrator {
     if (this.config.narrator.mode === 'template') return false;
     if (this.available !== null) return this.available;
     this.available = await new Promise<boolean>((resolve) => {
-      // watchdog: 자식이 SIGTERM을 무시하거나 손자가 stdout 파이프를 물고 있으면
-      // execFile 콜백이 영원히 안 올 수 있다 — 데몬을 동결시키지 않는다
       const watchdog = setTimeout(() => resolve(false), 12_000);
       execFile('claude', ['--version'], { timeout: 10_000, killSignal: 'SIGKILL' }, (err) => {
         clearTimeout(watchdog);
@@ -32,25 +39,24 @@ export class Narrator {
   }
 
   /**
-   * 이벤트 묶음을 1회 호출로 각색. 실패·timeout·개수 불일치 시 null — 호출부가 템플릿 폴백.
-   * 반환: 이벤트 순서와 같은 desc 문자열 배열.
+   * 이벤트 묶음을 1회 호출로 각색. 실패·timeout·개수 불일치 시 null — 호출부가 한국어 폴백.
+   * 반환: 이벤트 순서와 같은 멘트 문자열 배열.
    */
-  async narrateBatch(events: MatchEvent[], skin: Skin): Promise<(string | null)[] | null> {
+  async narrateBatch(events: MatchEvent[], snap: MatchSnapshot): Promise<(string | null)[] | null> {
     if (events.length === 0) return [];
     if (!(await this.isAvailable())) return null;
 
     const list = events
-      .map((e, i) => `${i + 1}. [${e.minute}] (${e.category}) ${e.rawText}`)
+      .map((e, i) => `${i + 1}. [${e.minute}] (${e.category}/${e.severity}) ${e.rawText}`)
       .join('\n');
     const prompt = [
-      skin.guide,
+      STYLE_GUIDE,
       '',
-      '아래 축구 이벤트 각각에 대해 위 가이드를 따르는 묘사 텍스트를 생성하라.',
-      '- 묘사는 반드시 한국어로 쓴다. 선수명·팀명 등 고유명사만 원문 표기를 허용한다.',
-      '- 묘사 본문만. 타임스탬프·상태 태그·접두사는 시스템이 붙인다.',
-      '- 스코어·시간·선수명은 입력에 있는 것만 사용하고 절대 바꾸지 않는다.',
-      '- 입력에 없는 사실(어시스트, 부상, 관중 수 등)을 지어내지 않는다.',
-      `- 출력은 JSON 문자열 배열 하나만. 길이 ${events.length}, 이벤트 순서 그대로.`,
+      `경기: ${snap.homeTeam}(${snap.homeAbbr}) vs ${snap.awayTeam}(${snap.awayAbbr})`,
+      `현재 스코어: ${snap.homeAbbr} ${snap.homeScore} : ${snap.awayScore} ${snap.awayAbbr}`,
+      '',
+      '아래 이벤트 각각을 위 규칙대로 한 줄 멘트로 바꿔라.',
+      `출력은 JSON 문자열 배열 하나만. 길이 ${events.length}, 이벤트 순서 그대로.`,
       '',
       '이벤트:',
       list,
@@ -63,9 +69,9 @@ export class Narrator {
     return parsed.map((s) => sanitizeDesc(s));
   }
 
-  /** tier-2 사후 보강용 단건 각색 */
-  async narrateOne(event: MatchEvent, skin: Skin): Promise<string | null> {
-    const batch = await this.narrateBatch([event], skin);
+  /** 단건 각색 (사후 보강용) */
+  async narrateOne(event: MatchEvent, snap: MatchSnapshot): Promise<string | null> {
+    const batch = await this.narrateBatch([event], snap);
     return batch?.[0] ?? null;
   }
 
@@ -97,7 +103,7 @@ function extractJsonArray(out: string): string[] | null {
   return null;
 }
 
-/** 각색 출력 위생 처리 — 형식이 서사를 이긴다: 한 줄, 길이 제한, 마크다운 잔재 제거 */
+/** 각색 출력 위생 처리 — 한 줄, 길이 제한, 마크다운 잔재 제거 */
 export function sanitizeDesc(s: string): string {
   let d = s.replace(/```[\s\S]*?```/g, ' ').replace(/[`*_>#]/g, '');
   d = d.split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
