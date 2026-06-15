@@ -4,6 +4,13 @@ import { runDaemon } from '../src/daemon.js';
 import { fetchScoreboard } from '../src/espn.js';
 import { runFollow } from '../src/follow.js';
 import { runReplay } from '../src/replay.js';
+import type { Language } from '../src/types.js';
+
+/** --lang 값 정규화: ko만 ko, 그 외(미지정 포함)는 undefined → config 기본값(en) 사용 */
+function parseLang(v: string | undefined): Language | undefined {
+  if (v === 'ko' || v === 'en') return v;
+  return undefined;
+}
 
 const USAGE = `worldcup-live-cli — watch football like you code.
 
@@ -16,6 +23,7 @@ const USAGE = `worldcup-live-cli — watch football like you code.
 
 옵션:
   --league <code>   리그 코드 (기본 fifa.world)
+  --lang <ko|en>    중계 출력 언어 (기본 en, daemon/replay 전용)
   --config <path>   config.json 경로 (기본 ~/.worldcup-live-cli/config.json)
   --once            1 tick만 실행 (검증용, daemon 전용)
   --speed <n>       replay 압축 배율 (기본 15 — 90분 경기를 ~6분에)
@@ -78,6 +86,7 @@ async function main(): Promise<number> {
     if (cmd === 'replay') {
       await runReplay(eventId, {
         league: flag('league'),
+        language: parseLang(flag('lang')),
         configPath: flag('config'),
         speed: Number(flag('speed')) || undefined,
       });
@@ -85,6 +94,7 @@ async function main(): Promise<number> {
     }
     await runDaemon(eventId, {
       league: flag('league'),
+      language: parseLang(flag('lang')),
       configPath: flag('config'),
       once: argv.includes('--once'),
     });

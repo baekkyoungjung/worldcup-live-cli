@@ -1,5 +1,6 @@
 {
   "league": "fifa.world",
+  "language": "en",
   "logDir": "~/.worldcup-live-cli",
   "pollIntervalSec": 10,
   "tier2PollIntervalSec": 3,

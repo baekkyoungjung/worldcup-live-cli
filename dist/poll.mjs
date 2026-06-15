@@ -14,6 +14,7 @@ var CONFIG_DIR = path.join(os.homedir(), ".worldcup-live-cli");
 var DEFAULTS = {
   league: "fifa.world",
   logDir: CONFIG_DIR,
+  language: "en",
   pollIntervalSec: 10,
   tier2PollIntervalSec: 3,
   ambientIntervalSec: 10,
@@ -60,6 +61,7 @@ function loadConfig(configPath) {
   if (!["auto", "claude", "template"].includes(merged.narrator.mode)) merged.narrator.mode = "auto";
   merged.narrator.model = typeof merged.narrator.model === "string" ? merged.narrator.model : DEFAULTS.narrator.model;
   merged.league = typeof merged.league === "string" && merged.league ? merged.league : DEFAULTS.league;
+  merged.language = merged.language === "ko" || merged.language === "en" ? merged.language : DEFAULTS.language;
   merged.logDir = expandHome(typeof merged.logDir === "string" && merged.logDir ? merged.logDir : DEFAULTS.logDir);
   return merged;
 }
@@ -320,7 +322,7 @@ function sleep(ms) {
 
 // src/narrate.ts
 import { execFile } from "node:child_process";
-var STYLE_GUIDE = [
+var STYLE_GUIDE_KO = [
   "\uB2F9\uC2E0\uC740 \uCD95\uAD6C \uACBD\uAE30\uB97C \uB85C\uADF8(logger)\uCC98\uB7FC \uC911\uACC4\uD55C\uB2E4. \uAC01 \uC774\uBCA4\uD2B8\uB97C \uD55C \uC904\uC9DC\uB9AC \uD55C\uAD6D\uC5B4 \uC911\uACC4 \uBA58\uD2B8\uB85C \uBC14\uAFD4\uB77C.",
   "- severity\uAC00 \uBD84\uC704\uAE30\uB97C \uC815\uD55C\uB2E4: log=\uB2F4\uB2F4\uD55C \uD750\uB984, warn=\uC704\uD5D8 \uC870\uC9D0(\uC138\uD2B8\uD53C\uC2A4\xB7\uC704\uD5D8\uC9C0\uC5ED \uC804\uAC1C), error=\uBC15\uC2A4 \uC548 \uACB0\uC815\uC801 \uC704\uAE30.",
   '- \uC704\uD5D8 \uC0C1\uD669\uC740 \uC5B4\uB290 \uD300 \uACE8\uBB38/\uBC15\uC2A4 \uCABD\uC778\uC9C0 \uC9DA\uC5B4\uB77C. \uC608) "\uC2A4\uCF54\uD2C0\uB79C\uB4DC\uAC00 \uC624\uB978\uCABD\uC5D0\uC11C \uCF54\uB108\uD0A5\uC744 \uC5BB\uC2B5\uB2C8\uB2E4", "\uD574\uC774\uD2F0 \uD398\uB110\uD2F0 \uBC15\uC2A4 \uC548\uC5D0\uC11C \uC704\uD5D8\uD55C \uC0C1\uD669\uC774 \uC624\uAC11\uB2C8\uB2E4".',
@@ -328,6 +330,33 @@ var STYLE_GUIDE = [
   "- \uD0C0\uC784\uC2A4\uD0EC\uD504\uC640 [level] \uD0DC\uADF8\uB294 \uC2DC\uC2A4\uD15C\uC774 \uBD99\uC778\uB2E4. \uBA58\uD2B8 \uBCF8\uBB38\uB9CC \uCD9C\uB825\uD558\uB77C(\uD0DC\uADF8\xB7\uC811\uB450\uC0AC\xB7\uB530\uC634\uD45C \uC5C6\uC774).",
   "- \uD300\uBA85\xB7\uC120\uC218\uBA85 \uB4F1 \uACE0\uC720\uBA85\uC0AC\uB9CC \uC6D0\uBB38 \uD45C\uAE30\uB97C \uD5C8\uC6A9\uD558\uACE0 \uB098\uBA38\uC9C0\uB294 \uD55C\uAD6D\uC5B4\uB85C \uC4F4\uB2E4."
 ].join("\n");
+var STYLE_GUIDE_EN = [
+  "You are narrating a football match like a logger. Rewrite each event as a one-line English commentary.",
+  "- Severity sets the mood: log=calm flow, warn=danger signs (set pieces, build-up in dangerous areas), error=clear-cut chance inside the box.",
+  `- For danger, name which team's goal/box it threatens. e.g. "Scotland win a corner on the right", "A dangerous moment inside the Haiti box".`,
+  "- Use only the scores, times and player names present in the input; never change or invent them. No assists, injuries or crowd details that are not in the input.",
+  "- The timestamp and [level] tag are added by the system. Output only the comment body (no tag, prefix or quotes).",
+  "- Keep proper nouns (team/player names) as given; write everything else in natural English."
+].join("\n");
+function styleGuide(lang) {
+  return lang === "ko" ? STYLE_GUIDE_KO : STYLE_GUIDE_EN;
+}
+var PROMPT_LABELS = {
+  ko: {
+    match: "\uACBD\uAE30",
+    score: "\uD604\uC7AC \uC2A4\uCF54\uC5B4",
+    instr: (n) => `\uC544\uB798 \uC774\uBCA4\uD2B8 \uAC01\uAC01\uC744 \uC704 \uADDC\uCE59\uB300\uB85C \uD55C \uC904 \uBA58\uD2B8\uB85C \uBC14\uAFD4\uB77C.
+\uCD9C\uB825\uC740 JSON \uBB38\uC790\uC5F4 \uBC30\uC5F4 \uD558\uB098\uB9CC. \uAE38\uC774 ${n}, \uC774\uBCA4\uD2B8 \uC21C\uC11C \uADF8\uB300\uB85C.`,
+    events: "\uC774\uBCA4\uD2B8:"
+  },
+  en: {
+    match: "Match",
+    score: "Current score",
+    instr: (n) => `Rewrite each event below into a one-line commentary per the rules above.
+Output exactly one JSON array of strings. Length ${n}, in the same order as the events.`,
+    events: "Events:"
+  }
+};
 var Narrator = class {
   available = null;
   config;
@@ -354,16 +383,17 @@ var Narrator = class {
     if (events.length === 0) return [];
     if (!await this.isAvailable()) return null;
     const list = events.map((e, i) => `${i + 1}. [${e.minute}] (${e.category}/${e.severity}) ${e.rawText}`).join("\n");
+    const lang = this.config.language;
+    const L = PROMPT_LABELS[lang] ?? PROMPT_LABELS.en;
     const prompt = [
-      STYLE_GUIDE,
+      styleGuide(lang),
       "",
-      `\uACBD\uAE30: ${snap.homeTeam}(${snap.homeAbbr}) vs ${snap.awayTeam}(${snap.awayAbbr})`,
-      `\uD604\uC7AC \uC2A4\uCF54\uC5B4: ${snap.homeAbbr} ${snap.homeScore} : ${snap.awayScore} ${snap.awayAbbr}`,
+      `${L.match}: ${snap.homeTeam}(${snap.homeAbbr}) vs ${snap.awayTeam}(${snap.awayAbbr})`,
+      `${L.score}: ${snap.homeAbbr} ${snap.homeScore} : ${snap.awayScore} ${snap.awayAbbr}`,
       "",
-      "\uC544\uB798 \uC774\uBCA4\uD2B8 \uAC01\uAC01\uC744 \uC704 \uADDC\uCE59\uB300\uB85C \uD55C \uC904 \uBA58\uD2B8\uB85C \uBC14\uAFD4\uB77C.",
-      `\uCD9C\uB825\uC740 JSON \uBB38\uC790\uC5F4 \uBC30\uC5F4 \uD558\uB098\uB9CC. \uAE38\uC774 ${events.length}, \uC774\uBCA4\uD2B8 \uC21C\uC11C \uADF8\uB300\uB85C.`,
+      L.instr(events.length),
       "",
-      "\uC774\uBCA4\uD2B8:",
+      L.events,
       list
     ].join("\n");
     const out = await this.run(prompt, this.config.narrator.timeoutSec * 1e3);
@@ -433,26 +463,9 @@ function formatLine(severity, text) {
 function formatCue(text) {
   return `${nowStamp()} ${CUE_ANSI}[BREAK]${RESET} ${text}`;
 }
-var AMBIENT_POOL = [
-  "\uC911\uC6D0\uC5D0\uC11C \uC591 \uD300\uC774 \uBCFC\uC744 \uC8FC\uACE0\uBC1B\uC2B5\uB2C8\uB2E4",
-  "\uD6C4\uBC29\uC5D0\uC11C \uCC9C\uCC9C\uD788 \uBE4C\uB4DC\uC5C5\uC744 \uAC00\uC838\uAC11\uB2C8\uB2E4",
-  "\uCE21\uBA74\uC744 \uD65C\uC6A9\uD55C \uC804\uAC1C\uB97C \uC2DC\uB3C4\uD569\uB2C8\uB2E4",
-  "\uC911\uC559 \uACBD\uD569 \u2014 \uC18C\uC720\uAD8C\uC774 \uC624\uAC11\uB2C8\uB2E4",
-  "\uD15C\uD3EC\uB97C \uB2A6\uCD94\uBA70 \uAE30\uD68C\uB97C \uC5FF\uBD05\uB2C8\uB2E4",
-  "\uBBF8\uB4DC\uD544\uB4DC \uC2F8\uC6C0\uC774 \uD33D\uD33D\uD569\uB2C8\uB2E4",
-  "\uB871\uBCFC\uB85C \uC804\uC120\uC744 \uB04C\uC5B4\uC62C\uB9BD\uB2C8\uB2E4",
-  "\uC810\uC720\uC728 \uC2F8\uC6C0\uC774 \uC774\uC5B4\uC9D1\uB2C8\uB2E4",
-  "\uC218\uBE44 \uB77C\uC778\uC744 \uC815\uBE44\uD558\uBA70 \uAC04\uACA9\uC744 \uC881\uD799\uB2C8\uB2E4",
-  "\uBCFC\uC774 \uC88C\uC6B0\uB85C \uBD84\uBC30\uB429\uB2C8\uB2E4",
-  "\uC804\uBC29 \uC555\uBC15 \uC218\uC704\uB97C \uB04C\uC5B4\uC62C\uB9BD\uB2C8\uB2E4",
-  "\uB290\uB9B0 \uD638\uD761\uC73C\uB85C \uACBD\uAE30\uB97C \uC6B4\uC601\uD569\uB2C8\uB2E4",
-  "\uC804\uBC29 \uC555\uBC15\uC5D0 \uD328\uC2A4\uAC00 \uB04A\uAE41\uB2C8\uB2E4",
-  "\uBC31\uD328\uC2A4\uB85C \uB2E4\uC2DC \uBE4C\uB4DC\uC5C5\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4",
-  "\uC911\uC6D0\uC5D0\uC11C \uC778\uD130\uC149\uD2B8\uB97C \uB178\uB9BD\uB2C8\uB2E4",
-  "\uC0AC\uC774\uB4DC\uB77C\uC778\uC744 \uB530\uB77C \uACF5\uC774 \uD750\uB985\uB2C8\uB2E4"
-];
-function renderAmbient() {
-  const text = AMBIENT_POOL[Math.floor(Math.random() * AMBIENT_POOL.length)];
+function renderAmbient(strings) {
+  const pool = strings.ambientPool;
+  const text = pool[Math.floor(Math.random() * pool.length)];
   return formatLine("log", text);
 }
 function teamName(abbr, snap) {
@@ -466,94 +479,69 @@ function opponentName(abbr, snap) {
   if (abbr === snap.awayAbbr) return snap.homeTeam;
   return "";
 }
-function renderEventLines(event, snap, desc) {
+function renderEventLines(event, snap, strings, desc) {
   const cat = event.category;
   const team = teamName(event.teamAbbr, snap);
   const opp = opponentName(event.teamAbbr, snap);
   switch (cat) {
     case "kickoff": {
       const venue = snap.venue ? ` @ ${snap.venue}` : "";
-      return [formatLine("log", `\uD0A5\uC624\uD504 \u2014 ${snap.homeTeam} vs ${snap.awayTeam}${venue}`)];
+      return [formatLine("log", strings.kickoff(snap.homeTeam, snap.awayTeam, venue))];
     }
     case "resume":
-      return [formatLine("log", "\uD6C4\uBC18\uC804 \uC2DC\uC791")];
+      return [formatLine("log", strings.resume)];
     case "fulltime":
-      return [formatLine("log", "\uACBD\uAE30 \uC885\uB8CC \u2014 \uD480\uD0C0\uC784 \uD718\uC2AC")];
+      return [formatLine("log", strings.fulltime)];
     case "halftime":
-      return [formatCue("\uC804\uBC18 \uC885\uB8CC \u2014 \uC7A0\uC2DC \uD6C4 \uD6C4\uBC18\uC804")];
+      return [formatCue(strings.halftime)];
     case "break":
-      return [formatCue("\uC218\uBD84 \uD734\uC2DD \u2014 \uC7A0\uC2DC \uC228\uC744 \uACE0\uB985\uB2C8\uB2E4")];
+      return [formatCue(strings.breakCue)];
     case "goal": {
       const score = parseScoreFromGoalText(event.rawText, snap) ?? { home: snap.homeScore, away: snap.awayScore };
       const scorer = event.player || teamName(event.teamAbbr, snap);
       const who = scorer ? `${scorer} \u2014 ` : "";
-      return [formatLine("critical", `\uACE8! ${who}${snap.homeAbbr} ${score.home} : ${score.away} ${snap.awayAbbr}`)];
+      return [formatLine("critical", strings.goal(who, snap.homeAbbr, score.home, score.away, snap.awayAbbr))];
     }
     default: {
-      const narration = (desc && desc.trim() ? sanitizeDesc(desc) : "") || fallbackKo(event, team, opp);
+      const narration = (desc && desc.trim() ? sanitizeDesc(desc) : "") || fallbackTemplate(event, team, opp, strings);
       return narration ? [formatLine(event.severity, narration)] : [];
     }
   }
 }
-function fallbackKo(event, team, opp) {
-  const t = team || "\uACF5\uACA9 \uD300";
+function fallbackTemplate(event, team, opp, strings) {
+  const t = team || strings.attackingDefault;
+  const fb = strings.fallback;
   switch (event.category) {
     case "penalty":
-      return `\uD398\uB110\uD2F0\uD0A5 \uC0C1\uD669! ${t} \uD0A4\uCEE4\uAC00 \uC900\uBE44\uD569\uB2C8\uB2E4`;
+      return fb.penalty(t);
     case "var":
-      return "VAR \uD310\uB3C5\uC774 \uC9C4\uD589\uB429\uB2C8\uB2E4";
+      return fb.var;
     case "red":
-      return `${t} \uB808\uB4DC\uCE74\uB4DC \u2014 \uC218\uC801 \uBCC0\uD654\uAC00 \uC0DD\uAE41\uB2C8\uB2E4`;
+      return fb.red(t);
     case "yellow":
-      return `${t} \uC610\uB85C\uCE74\uB4DC`;
+      return fb.yellow(t);
     case "sub":
-      return `${t} \uC120\uC218 \uAD50\uCCB4`;
+      return fb.sub(t);
     case "chance":
-      return opp ? `${t}\uC758 \uC29B! ${opp} \uACE8\uBB38\uC744 \uC704\uD611\uD569\uB2C8\uB2E4` : `\uC29B \u2014 \uACE8\uBB38\uC744 \uC704\uD611\uD569\uB2C8\uB2E4`;
+      return fb.chance(t, opp);
     case "setpiece":
-      return `${t} \uC138\uD2B8\uD53C\uC2A4 \uAE30\uD68C`;
+      return fb.setpiece(t);
     default:
-      return KO_DESC_BY_TYPE[event.typeId ?? ""] ?? "\uACBD\uAE30\uAC00 \uC774\uC5B4\uC9D1\uB2C8\uB2E4";
+      return strings.descByType[event.typeId ?? ""] ?? fb.generic;
   }
 }
-var KO_DESC_BY_TYPE = {
-  "66": "\uD30C\uC6B8 \u2014 \uD750\uB984\uC774 \uC7A0\uC2DC \uB04A\uAE41\uB2C8\uB2E4",
-  "68": "\uC624\uD504\uC0AC\uC774\uB4DC \u2014 \uACF5\uACA9\uC774 \uBA48\uCDA5\uB2C8\uB2E4",
-  "122": "\uD578\uB4DC\uBCFC \uC120\uC5B8",
-  "129": "\uACBD\uAE30\uAC00 \uC7A0\uC2DC \uBA48\uCDA5\uB2C8\uB2E4",
-  "130": "\uACBD\uAE30\uAC00 \uC7A0\uC2DC \uBA48\uCDA5\uB2C8\uB2E4"
-};
-function renderFinalReport(snap, highlights) {
+function renderFinalReport(snap, highlights, strings) {
   const lines = [];
-  lines.push(formatLine("log", `\u2500\u2500 \uCD5C\uC885 \uBCF4\uACE0 \u2500\u2500 ${snap.homeTeam} ${snap.homeScore} : ${snap.awayScore} ${snap.awayTeam}`));
+  lines.push(formatLine("log", strings.finalHeader(snap.homeTeam, snap.homeScore, snap.awayScore, snap.awayTeam)));
   for (const h of highlights) {
-    const who = [h.minute, h.player || teamName(h.teamAbbr, snap) || "", labelOf(h)].filter(Boolean).join(" ");
+    const who = [h.minute, h.player || teamName(h.teamAbbr, snap) || "", labelOf(h, strings)].filter(Boolean).join(" ");
     lines.push(formatLine(h.severity, who));
   }
-  lines.push(formatLine("log", "\uACBD\uAE30 \uC885\uB8CC. \uC218\uACE0\uD558\uC168\uC2B5\uB2C8\uB2E4."));
+  lines.push(formatLine("log", strings.finalFooter));
   return lines;
 }
-function labelOf(e) {
-  switch (e.category) {
-    case "goal":
-      return "\uB4DD\uC810";
-    case "red":
-      return "\uD1F4\uC7A5";
-    case "penalty":
-      return "PK";
-    case "yellow":
-      return "\uACBD\uACE0";
-    case "var":
-      return "VAR";
-    case "sub":
-      return "\uAD50\uCCB4";
-    case "chance":
-      return "\uAE30\uD68C";
-    case "setpiece":
-      return "\uC138\uD2B8\uD53C\uC2A4";
-    default:
-      return "\uAE30\uB85D";
-  }
+function labelOf(e, strings) {
+  return strings.labels[e.category] ?? strings.labelDefault;
 }
 function parseScoreFromGoalText(text, snap) {
   const m = /(?:Goal!|Own Goal[^.]*\.)\s+(.+?)\s+(\d+)[,:]\s+(.+?)\s+(\d+)\./.exec(text);
@@ -754,6 +742,126 @@ function isAlive(pid) {
   }
 }
 
+// src/strings.ts
+var KO = {
+  ambientPool: [
+    "\uC911\uC6D0\uC5D0\uC11C \uC591 \uD300\uC774 \uBCFC\uC744 \uC8FC\uACE0\uBC1B\uC2B5\uB2C8\uB2E4",
+    "\uD6C4\uBC29\uC5D0\uC11C \uCC9C\uCC9C\uD788 \uBE4C\uB4DC\uC5C5\uC744 \uAC00\uC838\uAC11\uB2C8\uB2E4",
+    "\uCE21\uBA74\uC744 \uD65C\uC6A9\uD55C \uC804\uAC1C\uB97C \uC2DC\uB3C4\uD569\uB2C8\uB2E4",
+    "\uC911\uC559 \uACBD\uD569 \u2014 \uC18C\uC720\uAD8C\uC774 \uC624\uAC11\uB2C8\uB2E4",
+    "\uD15C\uD3EC\uB97C \uB2A6\uCD94\uBA70 \uAE30\uD68C\uB97C \uC5FF\uBD05\uB2C8\uB2E4",
+    "\uBBF8\uB4DC\uD544\uB4DC \uC2F8\uC6C0\uC774 \uD33D\uD33D\uD569\uB2C8\uB2E4",
+    "\uB871\uBCFC\uB85C \uC804\uC120\uC744 \uB04C\uC5B4\uC62C\uB9BD\uB2C8\uB2E4",
+    "\uC810\uC720\uC728 \uC2F8\uC6C0\uC774 \uC774\uC5B4\uC9D1\uB2C8\uB2E4",
+    "\uC218\uBE44 \uB77C\uC778\uC744 \uC815\uBE44\uD558\uBA70 \uAC04\uACA9\uC744 \uC881\uD799\uB2C8\uB2E4",
+    "\uBCFC\uC774 \uC88C\uC6B0\uB85C \uBD84\uBC30\uB429\uB2C8\uB2E4",
+    "\uC804\uBC29 \uC555\uBC15 \uC218\uC704\uB97C \uB04C\uC5B4\uC62C\uB9BD\uB2C8\uB2E4",
+    "\uB290\uB9B0 \uD638\uD761\uC73C\uB85C \uACBD\uAE30\uB97C \uC6B4\uC601\uD569\uB2C8\uB2E4",
+    "\uC804\uBC29 \uC555\uBC15\uC5D0 \uD328\uC2A4\uAC00 \uB04A\uAE41\uB2C8\uB2E4",
+    "\uBC31\uD328\uC2A4\uB85C \uB2E4\uC2DC \uBE4C\uB4DC\uC5C5\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4",
+    "\uC911\uC6D0\uC5D0\uC11C \uC778\uD130\uC149\uD2B8\uB97C \uB178\uB9BD\uB2C8\uB2E4",
+    "\uC0AC\uC774\uB4DC\uB77C\uC778\uC744 \uB530\uB77C \uACF5\uC774 \uD750\uB985\uB2C8\uB2E4"
+  ],
+  kickoff: (home, away, venueSuffix) => `\uD0A5\uC624\uD504 \u2014 ${home} vs ${away}${venueSuffix}`,
+  resume: "\uD6C4\uBC18\uC804 \uC2DC\uC791",
+  fulltime: "\uACBD\uAE30 \uC885\uB8CC \u2014 \uD480\uD0C0\uC784 \uD718\uC2AC",
+  halftime: "\uC804\uBC18 \uC885\uB8CC \u2014 \uC7A0\uC2DC \uD6C4 \uD6C4\uBC18\uC804",
+  breakCue: "\uC218\uBD84 \uD734\uC2DD \u2014 \uC7A0\uC2DC \uC228\uC744 \uACE0\uB985\uB2C8\uB2E4",
+  goal: (who, homeAbbr, home, away, awayAbbr) => `\uACE8! ${who}${homeAbbr} ${home} : ${away} ${awayAbbr}`,
+  attackingDefault: "\uACF5\uACA9 \uD300",
+  fallback: {
+    penalty: (t) => `\uD398\uB110\uD2F0\uD0A5 \uC0C1\uD669! ${t} \uD0A4\uCEE4\uAC00 \uC900\uBE44\uD569\uB2C8\uB2E4`,
+    var: "VAR \uD310\uB3C5\uC774 \uC9C4\uD589\uB429\uB2C8\uB2E4",
+    red: (t) => `${t} \uB808\uB4DC\uCE74\uB4DC \u2014 \uC218\uC801 \uBCC0\uD654\uAC00 \uC0DD\uAE41\uB2C8\uB2E4`,
+    yellow: (t) => `${t} \uC610\uB85C\uCE74\uB4DC`,
+    sub: (t) => `${t} \uC120\uC218 \uAD50\uCCB4`,
+    chance: (t, opp) => opp ? `${t}\uC758 \uC29B! ${opp} \uACE8\uBB38\uC744 \uC704\uD611\uD569\uB2C8\uB2E4` : `\uC29B \u2014 \uACE8\uBB38\uC744 \uC704\uD611\uD569\uB2C8\uB2E4`,
+    setpiece: (t) => `${t} \uC138\uD2B8\uD53C\uC2A4 \uAE30\uD68C`,
+    generic: "\uACBD\uAE30\uAC00 \uC774\uC5B4\uC9D1\uB2C8\uB2E4"
+  },
+  descByType: {
+    "66": "\uD30C\uC6B8 \u2014 \uD750\uB984\uC774 \uC7A0\uC2DC \uB04A\uAE41\uB2C8\uB2E4",
+    "68": "\uC624\uD504\uC0AC\uC774\uB4DC \u2014 \uACF5\uACA9\uC774 \uBA48\uCDA5\uB2C8\uB2E4",
+    "122": "\uD578\uB4DC\uBCFC \uC120\uC5B8",
+    "129": "\uACBD\uAE30\uAC00 \uC7A0\uC2DC \uBA48\uCDA5\uB2C8\uB2E4",
+    "130": "\uACBD\uAE30\uAC00 \uC7A0\uC2DC \uBA48\uCDA5\uB2C8\uB2E4"
+  },
+  finalHeader: (homeTeam, home, away, awayTeam) => `\u2500\u2500 \uCD5C\uC885 \uBCF4\uACE0 \u2500\u2500 ${homeTeam} ${home} : ${away} ${awayTeam}`,
+  finalFooter: "\uACBD\uAE30 \uC885\uB8CC. \uC218\uACE0\uD558\uC168\uC2B5\uB2C8\uB2E4.",
+  labels: {
+    goal: "\uB4DD\uC810",
+    red: "\uD1F4\uC7A5",
+    penalty: "PK",
+    yellow: "\uACBD\uACE0",
+    var: "VAR",
+    sub: "\uAD50\uCCB4",
+    chance: "\uAE30\uD68C",
+    setpiece: "\uC138\uD2B8\uD53C\uC2A4"
+  },
+  labelDefault: "\uAE30\uB85D"
+};
+var EN = {
+  ambientPool: [
+    "Both sides trade passes in midfield",
+    "Patient build-up from the back",
+    "They work it down the flank",
+    "A midfield battle \u2014 possession swings",
+    "The tempo drops as they probe for an opening",
+    "A tight contest in the middle of the park",
+    "A long ball pushes the line higher",
+    "The possession battle goes on",
+    "The back line tightens its shape",
+    "The ball is switched from side to side",
+    "They ramp up the press",
+    "A slow, measured spell of control",
+    "The press cuts out the pass",
+    "Back to the keeper to restart the build-up",
+    "Looking to intercept in midfield",
+    "The ball rolls along the sideline"
+  ],
+  kickoff: (home, away, venueSuffix) => `Kick-off \u2014 ${home} vs ${away}${venueSuffix}`,
+  resume: "Second half under way",
+  fulltime: "Full time \u2014 the final whistle",
+  halftime: "Half-time \u2014 second half to follow shortly",
+  breakCue: "Water break \u2014 a moment to catch breath",
+  goal: (who, homeAbbr, home, away, awayAbbr) => `GOAL! ${who}${homeAbbr} ${home} : ${away} ${awayAbbr}`,
+  attackingDefault: "the attacking side",
+  fallback: {
+    penalty: (t) => `Penalty! ${t} ready to take it`,
+    var: "VAR check under way",
+    red: (t) => `${t} red card \u2014 down a player`,
+    yellow: (t) => `${t} booked`,
+    sub: (t) => `${t} substitution`,
+    chance: (t, opp) => opp ? `${t} shoot! Threatening the ${opp} goal` : "A shot \u2014 threatening the goal",
+    setpiece: (t) => `${t} set-piece chance`,
+    generic: "Play continues"
+  },
+  descByType: {
+    "66": "Foul \u2014 the flow is broken",
+    "68": "Offside \u2014 the attack is halted",
+    "122": "Handball given",
+    "129": "A brief stoppage",
+    "130": "A brief stoppage"
+  },
+  finalHeader: (homeTeam, home, away, awayTeam) => `\u2500\u2500 Full-time report \u2500\u2500 ${homeTeam} ${home} : ${away} ${awayTeam}`,
+  finalFooter: "Match over. Thanks for watching.",
+  labels: {
+    goal: "Goal",
+    red: "Red",
+    penalty: "PK",
+    yellow: "Booking",
+    var: "VAR",
+    sub: "Sub",
+    chance: "Chance",
+    setpiece: "Set-piece"
+  },
+  labelDefault: "Note"
+};
+var TABLE = { ko: KO, en: EN };
+function stringsFor(lang) {
+  return TABLE[lang] ?? EN;
+}
+
 // src/tier.ts
 var NOISE_TYPE_IDS = /* @__PURE__ */ new Set([
   "118",
@@ -872,6 +980,7 @@ var CATCHUP_THRESHOLD = 12;
 async function runDaemon(eventId, opts = {}) {
   const config = loadConfig(opts.configPath);
   if (opts.league) config.league = opts.league;
+  if (opts.language) config.language = opts.language;
   const lock = acquireLock(config.logDir, eventId);
   if (!lock.ok) {
     process.stderr.write(`[worldcup-live-cli] match ${eventId}\uC740 \uC774\uBBF8 \uB370\uBAAC(pid ${lock.pid})\uC774 \uCD94\uC801 \uC911
@@ -881,6 +990,7 @@ async function runDaemon(eventId, opts = {}) {
   const logger = new MatchLogger(config.logDir, eventId);
   const state = new MatchStateStore(config.logDir, eventId);
   const narrator = new Narrator(config);
+  const strings = stringsFor(config.language);
   logger.clearDone();
   logger.markWriter();
   process.stdout.write(
@@ -915,7 +1025,7 @@ async function runDaemon(eventId, opts = {}) {
       if (result.finished || opts.once) return;
       const inPlay = snap.state === "in" && snap.statusDetail !== "HT";
       if (inPlay && !result.emitted && Date.now() - lastOutputAt >= config.ambientIntervalSec * 1e3) {
-        logger.line(renderAmbient());
+        logger.line(renderAmbient(strings));
         lastOutputAt = Date.now();
       }
       const idle = snap.state === "pre" || snap.statusDetail === "HT";
@@ -934,7 +1044,7 @@ async function runDaemon(eventId, opts = {}) {
       return { finished: false, emitted: false };
     }
     if (!primed && events.length > CATCHUP_THRESHOLD) {
-      await catchUp(events, snap, logger, state);
+      await catchUp(events, snap, logger, state, strings);
       primed = true;
       state.markAnnounced(snap.homeScore, snap.awayScore);
       state.update(snap.state, snap.homeScore, snap.awayScore);
@@ -972,7 +1082,7 @@ async function runDaemon(eventId, opts = {}) {
         if (s && state.isAnnounced(s.home, s.away)) continue;
         state.markAnnounced(s?.home ?? snap.homeScore, s?.away ?? snap.awayScore);
       }
-      await logger.stream(renderEventLines(e, snap), STREAM_GAP_MS);
+      await logger.stream(renderEventLines(e, snap, strings), STREAM_GAP_MS);
       emitted = true;
       if (e.category === "goal" || e.category === "red") state.addHighlight(e);
       if (isHot(e) || HOT_CATEGORIES.has(e.category)) fastUntil = Date.now() + config.tier2.cooldownSec * 1e3;
@@ -982,7 +1092,7 @@ async function runDaemon(eventId, opts = {}) {
       let descs = null;
       if (!fastNow) descs = await narrator.narrateBatch(batched, snap).catch(() => null);
       for (let i = 0; i < batched.length; i++) {
-        for (const line of renderEventLines(batched[i], snap, descs?.[i])) {
+        for (const line of renderEventLines(batched[i], snap, strings, descs?.[i])) {
           logger.line(line);
           emitted = true;
         }
@@ -990,7 +1100,7 @@ async function runDaemon(eventId, opts = {}) {
     }
     state.update(snap.state, snap.homeScore, snap.awayScore);
     if (snap.state === "post") {
-      await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20)), 300);
+      await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20), strings), 300);
       logger.markDone();
       state.cleanup();
       process.stdout.write(`[worldcup-live-cli] match ${eventId} \uC885\uB8CC \u2014 \uB370\uBAAC \uC790\uC9C4 \uC885\uB8CC
@@ -1000,19 +1110,19 @@ async function runDaemon(eventId, opts = {}) {
     return { finished: false, emitted };
   }
 }
-async function catchUp(events, snap, logger, state) {
+async function catchUp(events, snap, logger, state, strings) {
   const kickoff = events.find((e) => e.category === "kickoff") ?? syntheticEvent("kickoff", snap, "");
-  await logger.stream(renderEventLines(kickoff, snap), STREAM_GAP_MS);
+  await logger.stream(renderEventLines(kickoff, snap, strings), STREAM_GAP_MS);
   state.markKickoff();
   for (const e of events) {
     if (e.category === "goal" || e.category === "red" || e.category === "penalty") {
-      await logger.stream(renderEventLines(e, snap), STREAM_GAP_MS);
+      await logger.stream(renderEventLines(e, snap, strings), STREAM_GAP_MS);
       if (e.category !== "penalty") state.addHighlight(e);
     }
   }
   if (snap.statusDetail === "HT") {
     const ht = events.find((e) => e.category === "halftime") ?? syntheticEvent("halftime", snap, "");
-    await logger.stream(renderEventLines(ht, snap), STREAM_GAP_MS);
+    await logger.stream(renderEventLines(ht, snap, strings), STREAM_GAP_MS);
   }
   if (events.some((e) => e.category === "halftime")) state.markHalftime();
 }
@@ -1157,6 +1267,7 @@ var AMBIENT_CHUNK_MS = 3e3;
 async function runReplay(eventId, opts = {}) {
   const config = loadConfig(opts.configPath);
   if (opts.league) config.league = opts.league;
+  if (opts.language) config.language = opts.language;
   const speed = Math.max(1, Number(opts.speed) || 15);
   const logger = new MatchLogger(config.logDir, eventId);
   logger.clearDone();
@@ -1189,6 +1300,7 @@ async function runReplayBody(eventId, config, speed, logger) {
   } catch {
   }
   const events = snap.items.map((i) => classify(i, config)).filter((e) => e.tier > 0);
+  const strings = stringsFor(config.language);
   process.stdout.write(
     `[worldcup-live-cli] \uB9AC\uD50C\uB808\uC774 \uC2DC\uC791 \u2014 match ${eventId} (${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}), x${speed}, ~${Math.ceil(95 / speed * 10) / 10}\uBD84 \uC608\uC0C1
 [worldcup-live-cli] \uD130\uBBF8\uB110 \uC2DC\uCCAD: tail -f ${logger.logPath}
@@ -1206,7 +1318,7 @@ async function runReplayBody(eventId, config, speed, logger) {
     minute: "0'",
     rawText: "kickoff"
   };
-  await logger.stream(renderEventLines(kickoff, running), STREAM_GAP_MS2);
+  await logger.stream(renderEventLines(kickoff, running, strings), STREAM_GAP_MS2);
   let halftimeDone = false;
   let fulltimeDone = false;
   for (const e of events) {
@@ -1221,28 +1333,28 @@ async function runReplayBody(eventId, config, speed, logger) {
       fulltimeDone = true;
     }
     const gap = Math.max(MIN_GAP_MS, Math.min(MAX_GAP_MS, (e.minuteNum - prevMinute) * (6e4 / speed)));
-    await pacedGap(gap, logger);
+    await pacedGap(gap, logger, strings);
     prevMinute = Math.max(prevMinute, e.minuteNum);
     if (e.category === "goal") {
       bumpScore(running, e);
       highlights.push(e);
     }
     if (e.category === "red") highlights.push(e);
-    await logger.stream(renderEventLines(e, running), STREAM_GAP_MS2);
+    await logger.stream(renderEventLines(e, running, strings), STREAM_GAP_MS2);
   }
-  await logger.stream(renderFinalReport(snap, highlights.slice(0, 20)), 300);
+  await logger.stream(renderFinalReport(snap, highlights.slice(0, 20), strings), 300);
   logger.markDone();
   process.stdout.write(`[worldcup-live-cli] \uB9AC\uD50C\uB808\uC774 \uC885\uB8CC \u2014 ${snap.homeAbbr} ${snap.homeScore}:${snap.awayScore} ${snap.awayAbbr}
 `);
 }
-async function pacedGap(gapMs, logger) {
+async function pacedGap(gapMs, logger, strings) {
   let remaining = gapMs;
   let first = true;
   while (remaining > 0) {
     const chunk = Math.min(remaining, AMBIENT_CHUNK_MS);
     await sleep(chunk);
     remaining -= chunk;
-    if (!first && remaining > 0) logger.line(renderAmbient());
+    if (!first && remaining > 0) logger.line(renderAmbient(strings));
     first = false;
   }
 }
@@ -1268,6 +1380,10 @@ function overlaps(a, b) {
 }
 
 // scripts/poll.ts
+function parseLang(v) {
+  if (v === "ko" || v === "en") return v;
+  return void 0;
+}
 var USAGE = `worldcup-live-cli \u2014 watch football like you code.
 
 \uC0AC\uC6A9\uBC95:
@@ -1279,6 +1395,7 @@ var USAGE = `worldcup-live-cli \u2014 watch football like you code.
 
 \uC635\uC158:
   --league <code>   \uB9AC\uADF8 \uCF54\uB4DC (\uAE30\uBCF8 fifa.world)
+  --lang <ko|en>    \uC911\uACC4 \uCD9C\uB825 \uC5B8\uC5B4 (\uAE30\uBCF8 en, daemon/replay \uC804\uC6A9)
   --config <path>   config.json \uACBD\uB85C (\uAE30\uBCF8 ~/.worldcup-live-cli/config.json)
   --once            1 tick\uB9CC \uC2E4\uD589 (\uAC80\uC99D\uC6A9, daemon \uC804\uC6A9)
   --speed <n>       replay \uC555\uCD95 \uBC30\uC728 (\uAE30\uBCF8 15 \u2014 90\uBD84 \uACBD\uAE30\uB97C ~6\uBD84\uC5D0)
@@ -1340,6 +1457,7 @@ async function main() {
     if (cmd === "replay") {
       await runReplay(eventId, {
         league: flag("league"),
+        language: parseLang(flag("lang")),
         configPath: flag("config"),
         speed: Number(flag("speed")) || void 0
       });
@@ -1347,6 +1465,7 @@ async function main() {
     }
     await runDaemon(eventId, {
       league: flag("league"),
+      language: parseLang(flag("lang")),
       configPath: flag("config"),
       once: argv.includes("--once")
     });

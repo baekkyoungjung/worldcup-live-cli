@@ -8,6 +8,7 @@ export const CONFIG_DIR = path.join(os.homedir(), '.worldcup-live-cli');
 const DEFAULTS: Config = {
   league: 'fifa.world',
   logDir: CONFIG_DIR,
+  language: 'en',
   pollIntervalSec: 10,
   tier2PollIntervalSec: 3,
   ambientIntervalSec: 10,
@@ -57,6 +58,8 @@ export function loadConfig(configPath?: string): Config {
   if (!['auto', 'claude', 'template'].includes(merged.narrator.mode)) merged.narrator.mode = 'auto';
   merged.narrator.model = typeof merged.narrator.model === 'string' ? merged.narrator.model : DEFAULTS.narrator.model;
   merged.league = typeof merged.league === 'string' && merged.league ? merged.league : DEFAULTS.league;
+  // 지원 외 언어는 'en'으로 폴백 (잘못된 config로도 죽지 않게)
+  merged.language = merged.language === 'ko' || merged.language === 'en' ? merged.language : DEFAULTS.language;
   merged.logDir = expandHome(typeof merged.logDir === 'string' && merged.logDir ? merged.logDir : DEFAULTS.logDir);
   return merged;
 }

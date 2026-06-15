@@ -4,8 +4,9 @@ import { MatchLogger, sleep } from './logger.js';
 import { Narrator } from './narrate.js';
 import { parseScoreFromGoalText, renderAmbient, renderEventLines, renderFinalReport } from './render.js';
 import { acquireLock, MatchStateStore } from './state.js';
+import { stringsFor, type Strings } from './strings.js';
 import { classify, isEndgameClose, isHot } from './tier.js';
-import type { Category, MatchEvent, MatchSnapshot, Severity } from './types.js';
+import type { Category, Language, MatchEvent, MatchSnapshot, Severity } from './types.js';
 
 const HOT_CATEGORIES = new Set<Category>(['goal', 'penalty', 'red', 'var']);
 const STREAM_GAP_MS = 600;
@@ -15,6 +16,8 @@ const CATCHUP_THRESHOLD = 12; // 첫 tick에 이보다 많이 쌓여 있으면 �
 export interface DaemonOptions {
   league?: string;
   configPath?: string;
+  /** 중계 출력 언어 — config보다 우선 */
+  language?: Language;
   /** 1 tick만 돌고 종료 — 검증용 */
   once?: boolean;
 }
@@ -22,6 +25,7 @@ export interface DaemonOptions {
 export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Promise<void> {
   const config = loadConfig(opts.configPath);
   if (opts.league) config.league = opts.league;
+  if (opts.language) config.language = opts.language;
 
   // 같은 경기에 데몬 둘이 붙으면 로그 중복·state 경쟁 — 두 번째는 정중히 거절
   const lock = acquireLock(config.logDir, eventId);
@@ -33,6 +37,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
   const logger = new MatchLogger(config.logDir, eventId);
   const state = new MatchStateStore(config.logDir, eventId);
   const narrator = new Narrator(config);
+  const strings = stringsFor(config.language);
 
   logger.clearDone();
   logger.markWriter();
@@ -76,7 +81,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
       // "10초 정적이면 좀 그렇지" — 침묵을 없애되 사실은 지어내지 않는다.
       const inPlay = snap.state === 'in' && snap.statusDetail !== 'HT';
       if (inPlay && !result.emitted && Date.now() - lastOutputAt >= config.ambientIntervalSec * 1000) {
-        logger.line(renderAmbient());
+        logger.line(renderAmbient(strings));
         lastOutputAt = Date.now();
       }
 
@@ -104,7 +109,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
     }
 
     if (!primed && events.length > CATCHUP_THRESHOLD) {
-      await catchUp(events, snap, logger, state);
+      await catchUp(events, snap, logger, state, strings);
       primed = true;
       state.markAnnounced(snap.homeScore, snap.awayScore);
       state.update(snap.state, snap.homeScore, snap.awayScore);
@@ -153,7 +158,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
         if (s && state.isAnnounced(s.home, s.away)) continue;
         state.markAnnounced(s?.home ?? snap.homeScore, s?.away ?? snap.awayScore);
       }
-      await logger.stream(renderEventLines(e, snap), STREAM_GAP_MS);
+      await logger.stream(renderEventLines(e, snap, strings), STREAM_GAP_MS);
       emitted = true;
       if (e.category === 'goal' || e.category === 'red') state.addHighlight(e);
       if (isHot(e) || HOT_CATEGORIES.has(e.category)) fastUntil = Date.now() + config.tier2.cooldownSec * 1000;
@@ -165,7 +170,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
       let descs: (string | null)[] | null = null;
       if (!fastNow) descs = await narrator.narrateBatch(batched, snap).catch(() => null);
       for (let i = 0; i < batched.length; i++) {
-        for (const line of renderEventLines(batched[i], snap, descs?.[i])) {
+        for (const line of renderEventLines(batched[i], snap, strings, descs?.[i])) {
           logger.line(line);
           emitted = true;
         }
@@ -175,7 +180,7 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
     state.update(snap.state, snap.homeScore, snap.awayScore);
 
     if (snap.state === 'post') {
-      await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20)), 300);
+      await logger.stream(renderFinalReport(snap, state.highlights.slice(0, 20), strings), 300);
       logger.markDone();
       state.cleanup();
       process.stdout.write(`[worldcup-live-cli] match ${eventId} 종료 — 데몬 자진 종료\n`);
@@ -191,20 +196,21 @@ async function catchUp(
   snap: MatchSnapshot,
   logger: MatchLogger,
   state: MatchStateStore,
+  strings: Strings,
 ): Promise<void> {
   const kickoff = events.find((e) => e.category === 'kickoff') ?? syntheticEvent('kickoff', snap, '');
-  await logger.stream(renderEventLines(kickoff, snap), STREAM_GAP_MS);
+  await logger.stream(renderEventLines(kickoff, snap, strings), STREAM_GAP_MS);
   state.markKickoff();
 
   for (const e of events) {
     if (e.category === 'goal' || e.category === 'red' || e.category === 'penalty') {
-      await logger.stream(renderEventLines(e, snap), STREAM_GAP_MS);
+      await logger.stream(renderEventLines(e, snap, strings), STREAM_GAP_MS);
       if (e.category !== 'penalty') state.addHighlight(e);
     }
   }
   if (snap.statusDetail === 'HT') {
     const ht = events.find((e) => e.category === 'halftime') ?? syntheticEvent('halftime', snap, '');
-    await logger.stream(renderEventLines(ht, snap), STREAM_GAP_MS);
+    await logger.stream(renderEventLines(ht, snap, strings), STREAM_GAP_MS);
   }
   if (events.some((e) => e.category === 'halftime')) state.markHalftime();
 }

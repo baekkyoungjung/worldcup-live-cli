@@ -44,6 +44,9 @@ export interface MatchEvent {
 
 export type MatchState = 'pre' | 'in' | 'post' | 'unknown';
 
+/** 중계 출력 언어. 지원 외 언어는 'en'으로 폴백한다 */
+export type Language = 'ko' | 'en';
+
 export interface MatchSnapshot {
   matchId: string;
   state: MatchState;
@@ -79,6 +82,8 @@ export interface RawItem {
 export interface Config {
   league: string;
   logDir: string;
+  /** 중계 출력 언어. 스킬이 --lang으로 주입, 미지정 시 기본 'en' */
+  language: Language;
   pollIntervalSec: number; // 하한 10s — 코드에서 clamp
   tier2PollIntervalSec: number; // 하한 3s — 코드에서 clamp
   /** 이벤트 없는 구간에서 앰비언트 멘트를 흘리는 최소 간격(초). 정적을 없앤다 */

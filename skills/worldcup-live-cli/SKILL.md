@@ -33,10 +33,18 @@ node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" <명령> [인자...]
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" list                       # 오늘 경기 목록
-node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" daemon <eventId>           # 라이브 데몬 (run_in_background)
-node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" replay <eventId> [--speed <n>]  # 끝난 경기 압축 재생 (run_in_background)
+node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" daemon <eventId> --lang <ko|en>            # 라이브 데몬 (run_in_background)
+node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" replay <eventId> --lang <ko|en> [--speed <n>]  # 끝난 경기 압축 재생 (run_in_background)
 node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" follow <eventId> --cursor <byte> --wait 60  # 새 라인 long-poll 1회분
 ```
+
+## 중계 언어 — 사용자 언어로 자동
+
+데몬은 백그라운드라 사용자 언어를 모른다. **중계를 시작할 때 `--lang`으로 넘겨주는 것은 이 스킬의 몫이다.**
+
+- daemon/replay를 띄울 때 **사용자의 대화 언어를 감지해 `--lang`을 붙인다**: 한국어면 `--lang ko`, 그 외 모든 언어는 `--lang en`. (지원: `ko`, `en` 둘뿐. 미지원 언어는 `en`으로.)
+- 데몬은 그 언어로 로깅 중계를 흘린다 — 직역이 아니라 로깅 스타일 재작성. `follow`는 바이트 중계라 언어 무관.
+- **recap은 당신(세션)이 작성한다 — 반드시 사용자의 대화 언어로 쓴다.** 중계 라인(데몬 생성)은 `--lang`, recap(세션 생성)은 대화 언어, 둘을 일치시킨다.
 
 ## 중계 라인 형식
 
@@ -54,7 +62,7 @@ node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" follow <eventId> --cursor <byte> --wait
 
 라이브(daemon)든 리플레이(replay)든 동일하다:
 
-1. daemon 또는 replay를 **Bash `run_in_background: true`로** 시작한다. 시작 시각을 기억해 둔다.
+1. daemon 또는 replay를 **Bash `run_in_background: true`로** 시작한다 — 사용자 대화 언어에 맞춰 **`--lang ko|en`을 반드시 붙인다.** 시작 시각을 기억해 둔다.
 2. `follow <eventId> --cursor 0 --wait 60`을 포그라운드로 호출한다. 출력의 마지막 줄은
    항상 `[follow] cursor=<n> <status>` 마커이고, 마커 위가 새 중계 라인이다.
 3. status별 처리:
@@ -76,6 +84,7 @@ node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" follow <eventId> --cursor <byte> --wait
   나타날 때마다**(하프타임·수분 휴식 — **필수**), ③ 경기 종료(done) 시 최종 recap.
 - **내용**: 마지막 recap 이후 당신이 흘려보낸 중계 라인을 근거로, 그 구간의 스코어 변화·
   결정적 장면(🔴/🟥)·흐름을 2~4줄로 요약한다. 없던 사실을 지어내지 않는다.
+- **언어**: recap은 **사용자의 대화 언어로 쓴다**(중계 라인의 `--lang`과 일치). 아래 예시는 한국어일 뿐, 영어 사용자면 영어로.
 - **형식**: 중계 코드블록과 구분되게 아래처럼 노출한다.
 
   > 📋 **최근 10분 요약 (32'~42')** — SCO가 박스 근처에서 두 차례 위협(🔴), 골은 없음. 스코어 HAI 0:1 SCO 유지.
@@ -86,11 +95,11 @@ node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" follow <eventId> --cursor <byte> --wait
 
 - **"오늘 경기 뭐 있어" / "경기 목록"**: `list` 실행 → 한국어로 정리해 보여준다.
 - **"중계 시작" / "모니터 돌려줘"**: `list`에서 라이브(`[in]`) 경기를 찾는다. 하나뿐이면 바로,
-  여럿이면 고르게 한 뒤 daemon을 백그라운드로 시작하고 **즉시 중계 루프에 진입한다.**
+  여럿이면 고르게 한 뒤 daemon을 백그라운드로(`--lang` 포함) 시작하고 **즉시 중계 루프에 진입한다.**
   라이브가 없으면 예정/종료 경기를 보여주고 리플레이를 제안한다.
 - **"이전 경기 리플레이" / "가짜로/다시 보여줘"**: 끝난 경기(`[post]`)를 골라 replay를
-  백그라운드로 시작하고 같은 루프에 진입한다. 빠르게 보려면 `--speed 60`. replay는 라이브엔
-  동작하지 않는다(daemon으로 안내).
+  백그라운드로(`--lang` 포함) 시작하고 같은 루프에 진입한다. 빠르게 보려면 `--speed 60`. replay는
+  라이브엔 동작하지 않는다(daemon으로 안내).
 - **"경기 어떻게 돼가"** (루프가 안 돌 때): 로그 마지막 20줄을 읽고 스코어·최근 상황을 한두
   문장으로 요약한 뒤, 원하면 **현재 파일 크기**(`wc -c < ~/.worldcup-live-cli/match-<id>.log`)를
   cursor로 루프에 합류한다 — 지나간 중계를 재방송하지 않는다.
@@ -105,5 +114,5 @@ node "$CLAUDE_PLUGIN_ROOT/dist/poll.mjs" follow <eventId> --cursor <byte> --wait
 - follow 출력은 ANSI 색이 제거된 상태로 온다 — 이모지(🟡🔴🟥)가 세션의 severity 표시다.
 - API 장애 시 데몬은 죽지 않고 `match-<eventId>.raw.jsonl` 사이드카에 raw를 남긴다.
   디버깅 요청이 오면 그 파일을 본다. 위장 로그에는 ESPN raw가 실리지 않는다.
-- `claude` CLI가 없는 환경에서도 한국어 템플릿 폴백으로 동작한다 — narrator 에러는 치명이 아니다.
+- `claude` CLI가 없는 환경에서도 선택 언어(ko/en) 템플릿 폴백으로 동작한다 — narrator 에러는 치명이 아니다.
 - 사실 불변: 스코어·시간·선수명은 항상 원데이터. 앰비언트 멘트는 흐름만 묘사할 뿐 사실을 담지 않는다.

@@ -1,4 +1,5 @@
 import { sanitizeDesc } from './narrate.js';
+import type { Strings } from './strings.js';
 import type { MatchEvent, MatchSnapshot, Severity } from './types.js';
 
 /**
@@ -46,28 +47,10 @@ export function formatCue(text: string): string {
   return `${nowStamp()} ${CUE_ANSI}[BREAK]${RESET} ${text}`;
 }
 
-const AMBIENT_POOL = [
-  '중원에서 양 팀이 볼을 주고받습니다',
-  '후방에서 천천히 빌드업을 가져갑니다',
-  '측면을 활용한 전개를 시도합니다',
-  '중앙 경합 — 소유권이 오갑니다',
-  '템포를 늦추며 기회를 엿봅니다',
-  '미드필드 싸움이 팽팽합니다',
-  '롱볼로 전선을 끌어올립니다',
-  '점유율 싸움이 이어집니다',
-  '수비 라인을 정비하며 간격을 좁힙니다',
-  '볼이 좌우로 분배됩니다',
-  '전방 압박 수위를 끌어올립니다',
-  '느린 호흡으로 경기를 운영합니다',
-  '전방 압박에 패스가 끊깁니다',
-  '백패스로 다시 빌드업을 시작합니다',
-  '중원에서 인터셉트를 노립니다',
-  '사이드라인을 따라 공이 흐릅니다',
-];
-
 /** 이벤트 없는 구간의 앰비언트 멘트 — log 레벨. 사실(스코어·시간)은 절대 담지 않는다 */
-export function renderAmbient(): string {
-  const text = AMBIENT_POOL[Math.floor(Math.random() * AMBIENT_POOL.length)];
+export function renderAmbient(strings: Strings): string {
+  const pool = strings.ambientPool;
+  const text = pool[Math.floor(Math.random() * pool.length)];
   return formatLine('log', text);
 }
 
@@ -85,10 +68,15 @@ function opponentName(abbr: string | undefined, snap: MatchSnapshot): string {
 }
 
 /**
- * 이벤트 → 로거 라인들. desc(각색)가 있으면 멘트로 쓰고, 없으면 한국어 폴백 템플릿.
+ * 이벤트 → 로거 라인들. desc(각색)가 있으면 멘트로 쓰고, 없으면 언어 템플릿 폴백.
  * 둘 다 비면 라인을 생략한다 — ESPN 영문 raw는 어떤 경로로도 출력하지 않는다.
  */
-export function renderEventLines(event: MatchEvent, snap: MatchSnapshot, desc?: string | null): string[] {
+export function renderEventLines(
+  event: MatchEvent,
+  snap: MatchSnapshot,
+  strings: Strings,
+  desc?: string | null,
+): string[] {
   const cat = event.category;
   const team = teamName(event.teamAbbr, snap);
   const opp = opponentName(event.teamAbbr, snap);
@@ -96,96 +84,70 @@ export function renderEventLines(event: MatchEvent, snap: MatchSnapshot, desc?: 
   switch (cat) {
     case 'kickoff': {
       const venue = snap.venue ? ` @ ${snap.venue}` : '';
-      return [formatLine('log', `킥오프 — ${snap.homeTeam} vs ${snap.awayTeam}${venue}`)];
+      return [formatLine('log', strings.kickoff(snap.homeTeam, snap.awayTeam, venue))];
     }
     case 'resume':
-      return [formatLine('log', '후반전 시작')];
+      return [formatLine('log', strings.resume)];
     case 'fulltime':
       // 스코어는 바로 뒤 renderFinalReport가 권위 있는 값으로 출력한다 — 여기서 스냅샷
       // 스코어를 또 찍으면 replay의 running 지연 등으로 최종 보고와 모순될 수 있다.
-      return [formatLine('log', '경기 종료 — 풀타임 휘슬')];
+      return [formatLine('log', strings.fulltime)];
     case 'halftime':
-      return [formatCue('전반 종료 — 잠시 후 후반전')];
+      return [formatCue(strings.halftime)];
     case 'break':
-      return [formatCue('수분 휴식 — 잠시 숨을 고릅니다')];
+      return [formatCue(strings.breakCue)];
     case 'goal': {
       const score = parseScoreFromGoalText(event.rawText, snap) ?? { home: snap.homeScore, away: snap.awayScore };
       const scorer = event.player || teamName(event.teamAbbr, snap);
       const who = scorer ? `${scorer} — ` : '';
-      return [formatLine('critical', `골! ${who}${snap.homeAbbr} ${score.home} : ${score.away} ${snap.awayAbbr}`)];
+      return [formatLine('critical', strings.goal(who, snap.homeAbbr, score.home, score.away, snap.awayAbbr))];
     }
     default: {
-      const narration = (desc && desc.trim() ? sanitizeDesc(desc) : '') || fallbackKo(event, team, opp);
+      const narration = (desc && desc.trim() ? sanitizeDesc(desc) : '') || fallbackTemplate(event, team, opp, strings);
       return narration ? [formatLine(event.severity, narration)] : [];
     }
   }
 }
 
-/** 각색(claude)이 없을 때의 한국어 폴백 — 카테고리별. 영문 raw를 흘리지 않는다 */
-function fallbackKo(event: MatchEvent, team: string, opp: string): string {
-  const t = team || '공격 팀';
+/** 각색(claude)이 없을 때의 언어 템플릿 폴백 — 카테고리별. 영문 raw를 흘리지 않는다 */
+function fallbackTemplate(event: MatchEvent, team: string, opp: string, strings: Strings): string {
+  const t = team || strings.attackingDefault;
+  const fb = strings.fallback;
   switch (event.category) {
     case 'penalty':
-      return `페널티킥 상황! ${t} 키커가 준비합니다`;
+      return fb.penalty(t);
     case 'var':
-      return 'VAR 판독이 진행됩니다';
+      return fb.var;
     case 'red':
-      return `${t} 레드카드 — 수적 변화가 생깁니다`;
+      return fb.red(t);
     case 'yellow':
-      return `${t} 옐로카드`;
+      return fb.yellow(t);
     case 'sub':
-      return `${t} 선수 교체`;
+      return fb.sub(t);
     case 'chance':
-      return opp ? `${t}의 슛! ${opp} 골문을 위협합니다` : `슛 — 골문을 위협합니다`;
+      return fb.chance(t, opp);
     case 'setpiece':
-      return `${t} 세트피스 기회`;
+      return fb.setpiece(t);
     default:
       // 일반/파울/오프사이드 — typeId 기준 최후 폴백
-      return KO_DESC_BY_TYPE[event.typeId ?? ''] ?? '경기가 이어집니다';
+      return strings.descByType[event.typeId ?? ''] ?? fb.generic;
   }
 }
 
-const KO_DESC_BY_TYPE: Record<string, string> = {
-  '66': '파울 — 흐름이 잠시 끊깁니다',
-  '68': '오프사이드 — 공격이 멈춥니다',
-  '122': '핸드볼 선언',
-  '129': '경기가 잠시 멈춥니다',
-  '130': '경기가 잠시 멈춥니다',
-};
-
 /** 경기 종료 최종 보고 — 로거 스타일 요약 */
-export function renderFinalReport(snap: MatchSnapshot, highlights: MatchEvent[]): string[] {
+export function renderFinalReport(snap: MatchSnapshot, highlights: MatchEvent[], strings: Strings): string[] {
   const lines: string[] = [];
-  lines.push(formatLine('log', `── 최종 보고 ── ${snap.homeTeam} ${snap.homeScore} : ${snap.awayScore} ${snap.awayTeam}`));
+  lines.push(formatLine('log', strings.finalHeader(snap.homeTeam, snap.homeScore, snap.awayScore, snap.awayTeam)));
   for (const h of highlights) {
-    const who = [h.minute, h.player || teamName(h.teamAbbr, snap) || '', labelOf(h)].filter(Boolean).join(' ');
+    const who = [h.minute, h.player || teamName(h.teamAbbr, snap) || '', labelOf(h, strings)].filter(Boolean).join(' ');
     lines.push(formatLine(h.severity, who));
   }
-  lines.push(formatLine('log', '경기 종료. 수고하셨습니다.'));
+  lines.push(formatLine('log', strings.finalFooter));
   return lines;
 }
 
-function labelOf(e: MatchEvent): string {
-  switch (e.category) {
-    case 'goal':
-      return '득점';
-    case 'red':
-      return '퇴장';
-    case 'penalty':
-      return 'PK';
-    case 'yellow':
-      return '경고';
-    case 'var':
-      return 'VAR';
-    case 'sub':
-      return '교체';
-    case 'chance':
-      return '기회';
-    case 'setpiece':
-      return '세트피스';
-    default:
-      return '기록';
-  }
+function labelOf(e: MatchEvent, strings: Strings): string {
+  return strings.labels[e.category] ?? strings.labelDefault;
 }
 
 /** "Goal! Mexico 1, South Africa 0." → 홈/원정 매핑된 스코어 */
