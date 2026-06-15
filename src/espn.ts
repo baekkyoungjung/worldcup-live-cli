@@ -19,7 +19,12 @@ export type FetchResult<T> = { ok: true; data: T } | { ok: false; error: string;
 
 async function getJson(url: string): Promise<FetchResult<unknown>> {
   try {
-    const res = await fetch(url, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(15_000) });
+    // redirect: 'error' — MITM/변조 응답이 임의 호스트로 30x 리다이렉트하는 SSRF 표면을 닫는다(고정 호스트만 허용)
+    const res = await fetch(url, {
+      headers: { 'user-agent': UA },
+      redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    });
     const body = await res.text();
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, rawBody: body.slice(0, 4000) };
     try {
@@ -33,7 +38,7 @@ async function getJson(url: string): Promise<FetchResult<unknown>> {
 }
 
 export async function fetchScoreboard(league: string): Promise<FetchResult<ScoreboardEntry[]>> {
-  const res = await getJson(`${BASE}/${league}/scoreboard`);
+  const res = await getJson(`${BASE}/${encodeURIComponent(league)}/scoreboard`);
   if (!res.ok) return res;
   try {
     const d = res.data as any;
@@ -65,7 +70,7 @@ export async function fetchScoreboard(league: string): Promise<FetchResult<Score
  * 어떤 필드도 신뢰하지 않는다 — 비공식 API는 언제든 모양이 바뀐다.
  */
 export async function fetchSummary(league: string, eventId: string): Promise<FetchResult<MatchSnapshot>> {
-  const res = await getJson(`${BASE}/${league}/summary?event=${encodeURIComponent(eventId)}`);
+  const res = await getJson(`${BASE}/${encodeURIComponent(league)}/summary?event=${encodeURIComponent(eventId)}`);
   if (!res.ok) return res;
   try {
     return { ok: true, data: parseSummary(res.data, eventId) };

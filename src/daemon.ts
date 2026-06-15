@@ -13,6 +13,13 @@ const STREAM_GAP_MS = 600;
 const IDLE_INTERVAL_SEC = 30; // pre / HT — 새 이벤트가 없는 구간
 const CATCHUP_THRESHOLD = 12; // 첫 tick에 이보다 많이 쌓여 있으면 중반 합류로 간주
 
+// ── 폭주 방지 안전 상한 (무한 루프·무한 토큰·무한 디스크의 구조적 차단) ──
+// 'post'가 영영 안 오는 경기(중단·버려진 경기, state가 'in'/'pre'/'unknown'에 고착,
+// API 영구 장애)에도 데몬이 자진 종료하도록 못박는다. 정상 경기는 이 상한에 닿지 않는다.
+const MAX_RUNTIME_MS = 5 * 60 * 60 * 1000; // 5시간 — 연장·승부차기·지연을 다 합쳐도 경기는 이 안에 끝난다
+const MAX_ERROR_STREAK = 20; // 연속 fetch 실패 한도 (capped 60s backoff면 ~20분) — 죽은 엔드포인트를 영원히 두드리지 않는다
+const MAX_NARRATION_CALLS = 2000; // 데몬 1회 수명당 claude 호출 총량 상한 — 정상 경기치(수백)를 크게 상회. 초과 시 템플릿 직행
+
 export interface DaemonOptions {
   league?: string;
   configPath?: string;
@@ -51,9 +58,24 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
   let errStreak = 0;
   let primed = state.kickoffAnnounced;
   let lastOutputAt = Date.now();
+  const startedAt = Date.now();
+  let narrationCalls = 0;
+
+  // 안전 종료: 사유를 사이드카에 남기고 done 마커를 찍어 follow 루프를 깔끔히 끝낸다.
+  // (markDone 없이 그냥 죽으면 follow가 'stalled'로 매달릴 수 있다.)
+  const safeStop = (reason: string): void => {
+    logger.raw('daemon-stop', { reason, runtimeMs: Date.now() - startedAt, narrationCalls });
+    logger.markDone();
+    process.stdout.write(`[worldcup-live-cli] match ${eventId} 안전 종료(${reason}) — 데몬 자진 종료\n`);
+  };
 
   try {
     for (;;) {
+      // 무한 실행 차단: 어떤 경기도 5시간을 넘기지 않는다 — 넘기면 비정상이므로 자진 종료
+      if (Date.now() - startedAt > MAX_RUNTIME_MS) {
+        safeStop('max-runtime');
+        return;
+      }
       const t0 = Date.now();
       const res = await fetchSummary(config.league, eventId);
 
@@ -61,6 +83,11 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
         // 비공식 API의 숙명 — 죽지 않고 raw를 사이드카에 남기며 버틴다
         logger.raw('fetch-error', { error: res.error, rawBody: res.rawBody });
         errStreak++;
+        // 죽은 엔드포인트를 영원히 두드리지 않는다 — 연속 실패 한도 넘으면 자진 종료
+        if (errStreak >= MAX_ERROR_STREAK) {
+          safeStop('error-streak');
+          return;
+        }
         const backoff = Math.min(60, config.pollIntervalSec * 2 ** Math.min(errStreak, 3));
         await sleep(backoff * 1000);
         continue;
@@ -168,7 +195,12 @@ export async function runDaemon(eventId: string, opts: DaemonOptions = {}): Prom
     if (batched.length > 0) {
       const fastNow = endgame || Date.now() < fastUntil;
       let descs: (string | null)[] | null = null;
-      if (!fastNow) descs = await narrator.narrateBatch(batched, snap).catch(() => null);
+      // 토큰 폭주 차단: claude 호출 총량이 상한을 넘으면 각색을 멈추고 템플릿으로만 간다.
+      // 정상 경기는 상한 근처도 못 가지만, 이벤트가 끝없이 새로 들어오는 비정상 피드를 못 박는다.
+      if (!fastNow && narrationCalls < MAX_NARRATION_CALLS) {
+        narrationCalls++;
+        descs = await narrator.narrateBatch(batched, snap).catch(() => null);
+      }
       for (let i = 0; i < batched.length; i++) {
         for (const line of renderEventLines(batched[i], snap, strings, descs?.[i])) {
           logger.line(line);

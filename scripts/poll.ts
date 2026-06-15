@@ -12,6 +12,14 @@ function parseLang(v: string | undefined): Language | undefined {
   return undefined;
 }
 
+/**
+ * ESPN eventId는 숫자다. eventId는 파일 경로(match-/state-/daemon-.lock 등)에 그대로
+ * 인터폴레이션되므로, 경로 탈출("../../x")을 막기 위해 path 사용 전에 엄격 검증한다.
+ */
+function validEventId(id: string | undefined): id is string {
+  return typeof id === 'string' && /^[0-9]{1,12}$/.test(id);
+}
+
 const USAGE = `worldcup-live-cli — watch football like you code.
 
 사용법:
@@ -65,8 +73,8 @@ async function main(): Promise<number> {
 
   if (cmd === 'follow') {
     const eventId = argv[1];
-    if (!eventId || eventId.startsWith('--')) {
-      process.stderr.write(USAGE);
+    if (!validEventId(eventId)) {
+      process.stderr.write('eventId는 숫자여야 한다 (list로 확인)\n');
       return 1;
     }
     await runFollow(eventId, {
@@ -79,8 +87,8 @@ async function main(): Promise<number> {
 
   if (cmd === 'daemon' || cmd === 'replay') {
     const eventId = argv[1];
-    if (!eventId || eventId.startsWith('--')) {
-      process.stderr.write(USAGE);
+    if (!validEventId(eventId)) {
+      process.stderr.write('eventId는 숫자여야 한다 (list로 확인)\n');
       return 1;
     }
     if (cmd === 'replay') {

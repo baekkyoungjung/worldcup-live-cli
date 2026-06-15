@@ -78,7 +78,11 @@ var BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer";
 var UA = "worldcup-live-cli/1.0 (+https://github.com)";
 async function getJson(url) {
   try {
-    const res = await fetch(url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(15e3) });
+    const res = await fetch(url, {
+      headers: { "user-agent": UA },
+      redirect: "error",
+      signal: AbortSignal.timeout(15e3)
+    });
     const body = await res.text();
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, rawBody: body.slice(0, 4e3) };
     try {
@@ -91,7 +95,7 @@ async function getJson(url) {
   }
 }
 async function fetchScoreboard(league) {
-  const res = await getJson(`${BASE}/${league}/scoreboard`);
+  const res = await getJson(`${BASE}/${encodeURIComponent(league)}/scoreboard`);
   if (!res.ok) return res;
   try {
     const d = res.data;
@@ -118,7 +122,7 @@ async function fetchScoreboard(league) {
   }
 }
 async function fetchSummary(league, eventId) {
-  const res = await getJson(`${BASE}/${league}/summary?event=${encodeURIComponent(eventId)}`);
+  const res = await getJson(`${BASE}/${encodeURIComponent(league)}/summary?event=${encodeURIComponent(eventId)}`);
   if (!res.ok) return res;
   try {
     return { ok: true, data: parseSummary(res.data, eventId) };
@@ -213,6 +217,7 @@ function toInt(v) {
 import fs2 from "node:fs";
 import path2 from "node:path";
 var WRAP_COL = 100;
+var MAX_RAW_BYTES = 5 * 1024 * 1024;
 function matchLogPath(logDir, matchId) {
   return path2.join(logDir, `match-${matchId}.log`);
 }
@@ -260,6 +265,12 @@ var MatchLogger = class {
   raw(kind, payload) {
     const entry = { ts: (/* @__PURE__ */ new Date()).toISOString(), kind, payload };
     try {
+      let size = 0;
+      try {
+        size = fs2.statSync(this.rawPath).size;
+      } catch {
+      }
+      if (size >= MAX_RAW_BYTES) return;
       fs2.appendFileSync(this.rawPath, JSON.stringify(entry) + "\n");
     } catch {
     }
@@ -977,6 +988,9 @@ var HOT_CATEGORIES = /* @__PURE__ */ new Set(["goal", "penalty", "red", "var"]);
 var STREAM_GAP_MS = 600;
 var IDLE_INTERVAL_SEC = 30;
 var CATCHUP_THRESHOLD = 12;
+var MAX_RUNTIME_MS = 5 * 60 * 60 * 1e3;
+var MAX_ERROR_STREAK = 20;
+var MAX_NARRATION_CALLS = 2e3;
 async function runDaemon(eventId, opts = {}) {
   const config = loadConfig(opts.configPath);
   if (opts.league) config.league = opts.league;
@@ -1002,13 +1016,29 @@ async function runDaemon(eventId, opts = {}) {
   let errStreak = 0;
   let primed = state.kickoffAnnounced;
   let lastOutputAt = Date.now();
+  const startedAt = Date.now();
+  let narrationCalls = 0;
+  const safeStop = (reason) => {
+    logger.raw("daemon-stop", { reason, runtimeMs: Date.now() - startedAt, narrationCalls });
+    logger.markDone();
+    process.stdout.write(`[worldcup-live-cli] match ${eventId} \uC548\uC804 \uC885\uB8CC(${reason}) \u2014 \uB370\uBAAC \uC790\uC9C4 \uC885\uB8CC
+`);
+  };
   try {
     for (; ; ) {
+      if (Date.now() - startedAt > MAX_RUNTIME_MS) {
+        safeStop("max-runtime");
+        return;
+      }
       const t0 = Date.now();
       const res = await fetchSummary(config.league, eventId);
       if (!res.ok) {
         logger.raw("fetch-error", { error: res.error, rawBody: res.rawBody });
         errStreak++;
+        if (errStreak >= MAX_ERROR_STREAK) {
+          safeStop("error-streak");
+          return;
+        }
         const backoff = Math.min(60, config.pollIntervalSec * 2 ** Math.min(errStreak, 3));
         await sleep(backoff * 1e3);
         continue;
@@ -1090,7 +1120,10 @@ async function runDaemon(eventId, opts = {}) {
     if (batched.length > 0) {
       const fastNow = endgame || Date.now() < fastUntil;
       let descs = null;
-      if (!fastNow) descs = await narrator.narrateBatch(batched, snap).catch(() => null);
+      if (!fastNow && narrationCalls < MAX_NARRATION_CALLS) {
+        narrationCalls++;
+        descs = await narrator.narrateBatch(batched, snap).catch(() => null);
+      }
       for (let i = 0; i < batched.length; i++) {
         for (const line of renderEventLines(batched[i], snap, strings, descs?.[i])) {
           logger.line(line);
@@ -1384,6 +1417,9 @@ function parseLang(v) {
   if (v === "ko" || v === "en") return v;
   return void 0;
 }
+function validEventId(id) {
+  return typeof id === "string" && /^[0-9]{1,12}$/.test(id);
+}
 var USAGE = `worldcup-live-cli \u2014 watch football like you code.
 
 \uC0AC\uC6A9\uBC95:
@@ -1437,8 +1473,8 @@ async function main() {
   }
   if (cmd === "follow") {
     const eventId = argv[1];
-    if (!eventId || eventId.startsWith("--")) {
-      process.stderr.write(USAGE);
+    if (!validEventId(eventId)) {
+      process.stderr.write("eventId\uB294 \uC22B\uC790\uC5EC\uC57C \uD55C\uB2E4 (list\uB85C \uD655\uC778)\n");
       return 1;
     }
     await runFollow(eventId, {
@@ -1450,8 +1486,8 @@ async function main() {
   }
   if (cmd === "daemon" || cmd === "replay") {
     const eventId = argv[1];
-    if (!eventId || eventId.startsWith("--")) {
-      process.stderr.write(USAGE);
+    if (!validEventId(eventId)) {
+      process.stderr.write("eventId\uB294 \uC22B\uC790\uC5EC\uC57C \uD55C\uB2E4 (list\uB85C \uD655\uC778)\n");
       return 1;
     }
     if (cmd === "replay") {

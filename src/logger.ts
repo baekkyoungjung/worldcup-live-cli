@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const WRAP_COL = 100;
+// raw 사이드카 상한 — 영구 장애/반복 throw로 디스크가 무한히 차지 않게 막는다. 넘으면 append 중단.
+const MAX_RAW_BYTES = 5 * 1024 * 1024; // 5MB
 
 export function matchLogPath(logDir: string, matchId: string): string {
   return path.join(logDir, `match-${matchId}.log`);
@@ -61,6 +63,14 @@ export class MatchLogger {
   raw(kind: string, payload: unknown): void {
     const entry = { ts: new Date().toISOString(), kind, payload };
     try {
+      // 상한 초과 시 더 쌓지 않는다 — 디스크 무한 증가 차단(진단용 사이드카지 영구 로그가 아니다)
+      let size = 0;
+      try {
+        size = fs.statSync(this.rawPath).size;
+      } catch {
+        // 파일 없음 — 0
+      }
+      if (size >= MAX_RAW_BYTES) return;
       fs.appendFileSync(this.rawPath, JSON.stringify(entry) + '\n');
     } catch {
       // 디스크 장애에도 데몬은 죽지 않는다
