@@ -46,6 +46,8 @@ tail -f ~/.worldcup-live-cli/match-<eventId>.log
 
 ## 불변 원칙 — 깨지 말 것
 
+- **폭주 방지 상한(`daemon.ts`)은 제거·완화하지 마라.** 백그라운드 데몬은 소비자(세션)와 분리돼 도므로, `'post'`가 영영 안 오는 경기(중단/버려진 경기, state 고착, API 영구장애)에서 무한 폴링·무한 토큰·무한 디스크가 될 수 있다. 이를 `MAX_RUNTIME_MS`(5h 벽시계), `MAX_ERROR_STREAK`(연속 실패), `MAX_NARRATION_CALLS`(claude 호출 총량) + `safeStop()`(raw 사유 + markDone)이 구조적으로 막는다. `errStreak`는 성공 fetch마다 0으로 리셋되므로 **stuck-`in`의 유일한 안전망은 `MAX_RUNTIME_MS`다.** 폴링 하한처럼 코드 고정이며 config로 못 끈다.
+- **eventId는 경로에 들어가기 전 숫자 검증(`/^[0-9]{1,12}$/`, `scripts/poll.ts`).** `match-<id>`/`state-<id>`/`daemon-<id>.lock` 등으로 인터폴레이션되므로 `../` 류가 `logDir` 밖 파일을 읽기/truncate/삭제할 수 있다(CLI·변조 ESPN 응답 양쪽에서 도달). 검증을 우회하는 경로를 추가하지 마라.
 - **사실 불변.** 스코어·시간·선수명은 항상 실제 ESPN 데이터를 직접 렌더한다. narrator(와 앰비언트 멘트)는 *흐름*만 묘사하고 사실을 지어내선 안 된다. 골/스코어 라인은 `claude`를 통째로 우회한다.
 - **메인 로그는 깨끗하게.** `match-<id>.log`에는 중계 라인만 들어간다. raw JSON·에러·디버깅은 `.raw.jsonl` 사이드카로 — 위장은 로그가 진짜 앱 로그처럼 보이는 데 달려 있다.
 - **폴링 간격 하한은 하드코딩**(`types.ts`의 `HARD_MIN_POLL_SEC` / `HARD_MIN_TIER2_POLL_SEC`, `config.ts`에서 강제): 기본 10s, 고속 3s. config로 더 줄일 수 없다 — 모두가 공유하는 비공식 엔드포인트 보호다. 이 하한을 우회하는 config 경로를 추가하지 마라.
